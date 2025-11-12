@@ -162,6 +162,9 @@ _get_profile (GstVaAV1Dec * self, const GstAV1SequenceHeaderOBU * seq_hdr)
     case GST_AV1_PROFILE_1:
       profile = VAProfileAV1Profile1;
       break;
+    case GST_AV1_PROFILE_2:
+      profile = VAProfileAV1Profile2;
+      break;
     default:
       GST_ERROR_OBJECT (self, "Unsupported av1 profile value %d",
           seq_hdr->seq_profile);
@@ -204,6 +207,10 @@ _get_rtformat (GstVaAV1Dec * self, VAProfile profile,
       } else if (seq_header->bit_depth == 10) {
         return VA_RT_FORMAT_YUV444_10;
       }
+      break;
+    case VAProfileAV1Profile2:
+      if (seq_header->bit_depth == 10)
+        return VA_RT_FORMAT_YUV422_10;
       break;
     default:
       break;

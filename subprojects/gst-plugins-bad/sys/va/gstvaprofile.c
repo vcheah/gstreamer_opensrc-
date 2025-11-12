@@ -116,6 +116,7 @@ static const struct ProfileMap
      we just map "0" to "main" and "1" to "high".  */
   P (AV1, Profile0, "main", "video/x-av1", "profile = (string) main"),
   P (AV1, Profile1, "high", "video/x-av1", "profile = (string) high"),
+  P (AV1, Profile2, "professional", "video/x-av1", "profile = (string) professional"),
   P (HEVC, SccMain444_10, "screen-extended-main-444-10", "video/x-h265",
       "profile = (string) screen-extended-main-444-10"),
 #if VA_CHECK_VERSION(1, 22, 0)
