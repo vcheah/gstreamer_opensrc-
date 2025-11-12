@@ -246,7 +246,7 @@ option('sctp-internal-usrsctp', type: 'feature', value : 'enabled',
        description: 'Whether to use the bundled usrsctp library or the system one')
 
 # MSDK plugin options
-option('mfx_api', type : 'combo', choices : ['MSDK', 'oneVPL', 'auto'], value : 'auto',
+option('mfx_api', type : 'combo', choices : ['MSDK', 'oneVPL', 'auto'], value : 'oneVPL',
        description : 'Select MFX API to build against')
 
 # nvcodec plugin options
