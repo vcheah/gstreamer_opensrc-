@@ -485,3 +485,48 @@ gst_va_display_check_version (GstVaDisplay * self, guint major, guint minor)
 
   return TRUE;
 }
+
+/**
+ * parse_threshold_limit_value:
+ *
+ * Reads the "threshold_limit_value_vadpy" environment variable to
+ * control DMA-BUF import behavior for cross-display VA scenarios.
+ *
+ * The environment variable is read only once on first call and cached for
+ * subsequent calls to avoid repeated environment lookups. On non-Linux
+ * platforms, this function always returns 0.
+ *
+ * Returns: validated threshold value (0-16), or 0 if not set or invalid
+ *
+ * Since: 1.27
+ */
+gint
+parse_threshold_limit_value (void)
+{
+#ifdef __linux__
+  static gint cached_value = -1;
+
+  if (G_UNLIKELY (cached_value == -1)) {
+    const gchar *env_str = g_getenv ("THRESHOLD_LIMIT_VALUE_VADPY");
+    gchar *end_ptr;
+    gint value;
+
+    if (!env_str || *env_str == '\0') {
+      cached_value = 0;
+      return cached_value;
+    }
+
+    value = (gint) g_ascii_strtoll (env_str, &end_ptr, 10);
+
+    if (*end_ptr != '\0') {
+      cached_value = 0;
+    } else {
+      cached_value = CLAMP (value, 0, 16);
+    }
+  }
+
+  return cached_value;
+#else
+  return 0;
+#endif
+}

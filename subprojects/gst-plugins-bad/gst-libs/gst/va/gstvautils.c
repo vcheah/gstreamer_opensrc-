@@ -315,13 +315,16 @@ gst_va_handle_set_context (GstElement * element, GstContext * context,
   }
 
   if (display_replacement) {
-    if (!gst_va_display_drm_is_i915 (display_replacement)) {
+
+    const gint vadpy_threshold = parse_threshold_limit_value ();
+
+    if (!gst_va_display_drm_is_i915 (display_replacement) && vadpy_threshold) {
       if (gst_va_display_is_implementation (display_replacement,
               GST_VA_IMPLEMENTATION_INTEL_IHD) && !from_neighbor) {
         guint ref;
 
         ref = GST_OBJECT_REFCOUNT_VALUE (display_replacement);
-        if (ref > 4) {
+        if (ref > vadpy_threshold) {
           gst_object_unref (display_replacement);
           return FALSE;
         }
