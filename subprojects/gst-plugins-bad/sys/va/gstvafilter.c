@@ -1811,6 +1811,7 @@ gst_va_filter_compose (GstVaFilter * self, GstVaComposeTransaction * tx)
   VADisplay dpy;
   VAStatus status;
   VASurfaceID out_surface;
+  GQueue *wrapped_buffers = g_queue_new ();
   GstVaComposeSample *sample;
 
   g_return_val_if_fail (GST_IS_VA_FILTER (self), FALSE);
@@ -1846,6 +1847,9 @@ gst_va_filter_compose (GstVaFilter * self, GstVaComposeTransaction * tx)
 
     /* (transfer full), unref it */
     gst_buffer_unref (sample->buffer);
+
+    if (sample->wrapped_buffer)
+      g_queue_push_tail (wrapped_buffers, sample->wrapped_buffer);
 
     GST_OBJECT_LOCK (self);
     /* *INDENT-OFF* */
@@ -1890,9 +1894,11 @@ gst_va_filter_compose (GstVaFilter * self, GstVaComposeTransaction * tx)
   status = vaEndPicture (dpy, self->context);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaEndPicture: %s", vaErrorStr (status));
+    g_queue_free_full (wrapped_buffers, (GDestroyNotify) gst_buffer_unref);
     return FALSE;
   }
 
+  g_queue_free_full (wrapped_buffers, (GDestroyNotify) gst_buffer_unref);
   return TRUE;
 
 fail_end_pic:
@@ -1900,6 +1906,8 @@ fail_end_pic:
     status = vaEndPicture (dpy, self->context);
     if (status != VA_STATUS_SUCCESS)
       GST_ERROR_OBJECT (self, "vaEndPicture: %s", vaErrorStr (status));
+
+    g_queue_free_full (wrapped_buffers, (GDestroyNotify) gst_buffer_unref);
     return FALSE;
   }
 }
