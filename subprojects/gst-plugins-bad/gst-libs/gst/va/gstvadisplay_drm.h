@@ -38,5 +38,7 @@ GST_VA_API
 GType                 gst_va_display_drm_get_type         (void);
 GST_VA_API
 GstVaDisplay *        gst_va_display_drm_new_from_path    (const gchar * path) G_GNUC_WARN_UNUSED_RESULT;
+GST_VA_API
+gboolean              gst_va_display_drm_is_i915          (GstVaDisplay * display);
 
 G_END_DECLS
