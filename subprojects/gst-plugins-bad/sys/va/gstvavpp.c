@@ -858,14 +858,19 @@ gst_va_vpp_transform (GstBaseTransform * trans, GstBuffer * inbuf,
 {
   GstVaVpp *self = GST_VA_VPP (trans);
   GstVaBaseTransform *btrans = GST_VA_BASE_TRANSFORM (trans);
-  GstBuffer *buf = NULL;
+  GstBuffer *buf = NULL, *prepared_buf = NULL;
   GstFlowReturn res = GST_FLOW_OK;
   GstVaSample src, dst;
 
   if (G_UNLIKELY (!btrans->negotiated))
     goto unknown_format;
 
-  res = gst_va_base_transform_import_buffer (btrans, inbuf, &buf);
+  prepared_buf = gst_va_buffer_prepare_for_import (inbuf, btrans->display);
+  if (!prepared_buf)
+    return GST_FLOW_ERROR;
+
+  res = gst_va_base_transform_import_buffer (btrans, prepared_buf, &buf);
+
   if (res != GST_FLOW_OK)
     return res;
 
@@ -892,6 +897,8 @@ gst_va_vpp_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   }
 
 bail:
+  if (prepared_buf != inbuf)
+    gst_clear_buffer (&prepared_buf);
   gst_buffer_unref (buf);
 
   return res;
