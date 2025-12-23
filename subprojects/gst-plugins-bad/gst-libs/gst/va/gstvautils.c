@@ -122,6 +122,7 @@ gst_va_context_query (GstElement * element, const gchar * context_type)
 {
   GstQuery *query;
   GstContext *ctxt = NULL;
+  GstStructure *str = NULL;
 
   _init_context_debug ();
 
@@ -132,11 +133,23 @@ gst_va_context_query (GstElement * element, const gchar * context_type)
   query = gst_query_new_context (context_type);
   if (_gst_va_run_query (element, query, GST_PAD_SRC)) {
     gst_query_parse_context (query, &ctxt);
+
+    if (ctxt) {
+      str = gst_context_writable_structure (ctxt);
+      gst_structure_set (str, "from-neighbor", G_TYPE_BOOLEAN, TRUE, NULL);
+    }
+
     GST_CAT_INFO_OBJECT (GST_CAT_CONTEXT, element,
         "found context (%p) in downstream query", ctxt);
     gst_element_set_context (element, ctxt);
   } else if (_gst_va_run_query (element, query, GST_PAD_SINK)) {
     gst_query_parse_context (query, &ctxt);
+
+    if (ctxt) {
+      str = gst_context_writable_structure (ctxt);
+      gst_structure_set (str, "from-neighbor", G_TYPE_BOOLEAN, TRUE, NULL);
+    }
+
     GST_CAT_INFO_OBJECT (GST_CAT_CONTEXT, element,
         "found context (%p) in upstream query", ctxt);
     gst_element_set_context (element, ctxt);
@@ -274,6 +287,8 @@ gst_va_handle_set_context (GstElement * element, GstContext * context,
 {
   GstVaDisplay *display_replacement = NULL;
   const gchar *context_type, *type_name;
+  gboolean from_neighbor = FALSE;
+  const GstStructure *str;
 
   _init_context_debug ();
 
@@ -283,6 +298,11 @@ gst_va_handle_set_context (GstElement * element, GstContext * context,
     return FALSE;
 
   context_type = gst_context_get_context_type (context);
+
+  str = gst_context_get_structure (context);
+  if (!gst_structure_get (str, "from-neighbor", G_TYPE_BOOLEAN,
+          &from_neighbor, NULL))
+    from_neighbor = FALSE;
 
   if (g_strcmp0 (context_type, GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR) == 0) {
     type_name = G_OBJECT_TYPE_NAME (element);
@@ -295,6 +315,22 @@ gst_va_handle_set_context (GstElement * element, GstContext * context,
   }
 
   if (display_replacement) {
+
+    const gint vadpy_threshold = parse_threshold_limit_value ();
+
+    if (!gst_va_display_drm_is_i915 (display_replacement) && vadpy_threshold) {
+      if (gst_va_display_is_implementation (display_replacement,
+              GST_VA_IMPLEMENTATION_INTEL_IHD) && !from_neighbor) {
+        guint ref;
+
+        ref = GST_OBJECT_REFCOUNT_VALUE (display_replacement);
+        if (ref > vadpy_threshold) {
+          gst_object_unref (display_replacement);
+          return FALSE;
+        }
+      }
+    }
+
     gst_object_replace ((GstObject **) display_ptr,
         (GstObject *) display_replacement);
     gst_object_unref (display_replacement);

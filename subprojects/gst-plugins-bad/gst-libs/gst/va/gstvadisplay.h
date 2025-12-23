@@ -131,6 +131,8 @@ GST_VA_API
 gboolean              gst_va_display_check_version        (GstVaDisplay * self,
                                                            guint major,
                                                            guint minor);
+GST_VA_API
+gint                  parse_threshold_limit_value         (void);
 
 /**
  * gst_va_display_is_implementation:
