@@ -318,7 +318,8 @@ gst_va_handle_set_context (GstElement * element, GstContext * context,
 
     const gint vadpy_threshold = parse_threshold_limit_value ();
 
-    if (!gst_va_display_drm_is_i915 (display_replacement)
+    if (GST_IS_VA_DISPLAY_DRM (display_replacement)
+        && !gst_va_display_drm_is_i915 (display_replacement)
         && gst_va_display_is_implementation (display_replacement,
             GST_VA_IMPLEMENTATION_INTEL_IHD) && vadpy_threshold) {
 
