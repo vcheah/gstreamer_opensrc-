@@ -1274,9 +1274,6 @@ gst_va_buffer_prepare_for_import (GstBuffer * buffer, GstVaDisplay * display)
   g_return_val_if_fail (GST_IS_BUFFER (buffer), NULL);
   g_return_val_if_fail (display != NULL, NULL);
 
-  if (parse_threshold_limit_value () <= 0)
-    return buffer;
-
   mem = gst_buffer_peek_memory (buffer, 0);
 
   if (gst_is_dmabuf_memory (mem) &&
