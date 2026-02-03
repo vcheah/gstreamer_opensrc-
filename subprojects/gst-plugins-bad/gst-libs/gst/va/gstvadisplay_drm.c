@@ -57,6 +57,7 @@ struct _GstVaDisplayDrm
   /* <private> */
   gchar *path;
   gint fd;
+  gboolean is_i915;
 };
 
 /**
@@ -134,29 +135,28 @@ gst_va_display_drm_finalize (GObject * object)
 static gpointer
 gst_va_display_drm_create_va_display (GstVaDisplay * display)
 {
-  int fd, saved_errno = 0;
   GstVaDisplayDrm *self = GST_VA_DISPLAY_DRM (display);
+  int fd;
 
   fd = open (self->path, O_CLOEXEC | O_RDWR);
-  saved_errno = errno;
   if (fd < 0) {
-    GST_WARNING_OBJECT (self, "Failed to open %s: %s", self->path,
-        g_strerror (saved_errno));
-    return 0;
+    GST_WARNING_OBJECT (self, "Failed to open %s: %s",
+        self->path, g_strerror (errno));
+    return NULL;
   }
 #ifdef HAVE_LIBDRM
-  {
-    drmVersion *version;
-
-    version = drmGetVersion (fd);
-    if (!version) {
-      GST_ERROR_OBJECT (self, "Device %s is not a DRM render node", self->path);
-      return 0;
-    }
-    GST_INFO_OBJECT (self, "DRM render node with kernel driver %s",
-        version->name);
-    drmFreeVersion (version);
+  drmVersionPtr version = drmGetVersion (fd);
+  if (!version) {
+    GST_ERROR_OBJECT (self, "Device %s is not a DRM render node", self->path);
+    close (fd);
+    return NULL;
   }
+
+  self->is_i915 = g_str_equal (version->name, "i915");
+  GST_INFO_OBJECT (self, "DRM driver: %s", version->name);
+  drmFreeVersion (version);
+#else
+  self->is_i915 = FALSE;
 #endif
 
   self->fd = fd;
@@ -187,6 +187,14 @@ static void
 gst_va_display_drm_init (GstVaDisplayDrm * self)
 {
   self->fd = -1;
+}
+
+gboolean
+gst_va_display_drm_is_i915 (GstVaDisplay * display)
+{
+  g_return_val_if_fail (GST_IS_VA_DISPLAY_DRM (display), FALSE);
+
+  return GST_VA_DISPLAY_DRM (display)->is_i915;
 }
 
 /**
