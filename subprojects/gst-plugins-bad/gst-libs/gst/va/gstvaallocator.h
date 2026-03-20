@@ -32,6 +32,17 @@ G_BEGIN_DECLS
 #define GST_IS_VA_DMABUF_ALLOCATOR(obj)         (G_TYPE_CHECK_INSTANCE_TYPE((obj), GST_TYPE_VA_DMABUF_ALLOCATOR))
 #define GST_IS_VA_DMABUF_ALLOCATOR_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass), GST_TYPE_VA_DMABUF_ALLOCATOR))
 
+#define RESET       "\033[0m"
+
+#define BLACK       "\033[0;30m"
+#define RED         "\033[0;31m"
+#define GREEN       "\033[0;32m"
+#define YELLOW      "\033[0;33m"
+#define BLUE        "\033[0;34m"
+#define ORANGE      "\033[38;5;208m"
+#define MAGENTA     "\033[0;35m"
+#define CYAN        "\033[0;36m"
+
 GST_VA_API
 GType                 gst_va_dmabuf_allocator_get_type    (void);
 GST_VA_API
