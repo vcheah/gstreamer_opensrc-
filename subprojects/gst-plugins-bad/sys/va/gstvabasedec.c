@@ -855,7 +855,7 @@ _caps_video_format_from_chroma (GstCaps * caps, guint chroma_type)
 
 /* ordered list of capsfeature preference */
 enum
-{ VA, DMABUF, SYSMEM };
+{ DMABUF, VA, SYSMEM };
 
 void
 gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
@@ -868,7 +868,7 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
   gboolean is_any;
   GstIdStr sysmem = GST_ID_STR_INIT, dmabuf = GST_ID_STR_INIT, va =
       GST_ID_STR_INIT;
-  const GstIdStr *feats[] = { &va, &dmabuf, &sysmem };
+  const GstIdStr *feats[] = { &dmabuf, &va, &sysmem };
 
   gst_id_str_set_static_str (&sysmem, GST_CAPS_FEATURE_MEMORY_SYSTEM_MEMORY);
   gst_id_str_set_static_str (&dmabuf, GST_CAPS_FEATURE_MEMORY_DMABUF);
