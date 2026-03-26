@@ -1229,6 +1229,7 @@ gst_va_vpp_fixate_format (GstVaVpp * self, GstCaps * caps, GstCaps * result)
   gint min_loss = G_MAXINT;
   guint i, best_i, capslen;
   guint64 best_modifier;
+  gboolean is_any = FALSE;
 
   ins = gst_caps_get_structure (caps, 0);
 
@@ -1264,6 +1265,15 @@ gst_va_vpp_fixate_format (GstVaVpp * self, GstCaps * caps, GstCaps * result)
   best_modifier = DRM_FORMAT_MOD_INVALID;
   capslen = gst_caps_get_size (result);
   GST_DEBUG_OBJECT (self, "iterate %d structures", capslen);
+
+  {
+    GstCaps *peer_caps =
+        gst_pad_peer_query_caps (GST_BASE_TRANSFORM_SRC_PAD
+        (GST_BASE_TRANSFORM (self)), NULL);
+    is_any = gst_caps_is_any (peer_caps);
+    gst_clear_caps (&peer_caps);
+  }
+
   for (i = 0; i < capslen; i++) {
     gboolean is_dma;
     GstStructure *tests;
@@ -1272,6 +1282,13 @@ gst_va_vpp_fixate_format (GstVaVpp * self, GstCaps * caps, GstCaps * result)
     guint32 fourcc;
 
     features = gst_caps_get_features (result, i);
+
+    /* Prefer system memory when downstream accepts any caps (e.g. fakesink). */
+    if (is_any
+        && !gst_caps_features_is_equal (features,
+            GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY))
+      continue;
+
     tests = gst_caps_get_structure (result, i);
 
     if (gst_caps_features_contains (features, GST_CAPS_FEATURE_MEMORY_DMABUF)) {
