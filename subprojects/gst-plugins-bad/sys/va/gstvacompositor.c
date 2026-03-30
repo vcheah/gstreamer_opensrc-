@@ -1391,13 +1391,13 @@ gst_va_compositor_update_caps (GstVideoAggregator * vagg, GstCaps * src_caps)
 
   /* We only decide caps feature and video format here. Other fields are
      fixated in fixate_src_caps() later.
-     We consider the features first, in the order of "memory:VAMemory",
-     "memory:DMABuf" and "memory:SystemMemory". Then within that feature,
+     We consider the features first, in the order of "memory:DMABuf",
+     "memory:VAMemory" and "memory:SystemMemory". Then within that feature,
      we iterate each input pad's format and find the best matched one. */
-  va_formats = _collect_formats_in_caps_by_feature (src_caps,
-      GST_CAPS_FEATURE_MEMORY_VA, NULL);
   dma_formats = _collect_formats_in_caps_by_feature (src_caps,
       GST_CAPS_FEATURE_MEMORY_DMABUF, &modifiers);
+  va_formats = _collect_formats_in_caps_by_feature (src_caps,
+      GST_CAPS_FEATURE_MEMORY_VA, NULL);
   sys_formats = _collect_formats_in_caps_by_feature (src_caps,
       GST_CAPS_FEATURE_MEMORY_SYSTEM_MEMORY, NULL);
 
@@ -1456,16 +1456,7 @@ gst_va_compositor_update_caps (GstVideoAggregator * vagg, GstCaps * src_caps)
 
   GST_OBJECT_UNLOCK (vagg);
 
-  if (va_formats) {
-    if (best_va != GST_VIDEO_FORMAT_UNKNOWN) {
-      clip_caps = _caps_from_format_and_feature (best_va,
-          DRM_FORMAT_MOD_INVALID, GST_CAPS_FEATURE_MEMORY_VA);
-    } else {
-      clip_caps = gst_caps_new_empty_simple ("video/x-raw");
-      gst_caps_set_features_simple (clip_caps,
-          gst_caps_features_new_single_static_str (GST_CAPS_FEATURE_MEMORY_VA));
-    }
-  } else if (dma_formats) {
+  if (dma_formats) {
     g_assert (dma_formats->len == modifiers->len);
 
     if (best_dma != GST_VIDEO_FORMAT_UNKNOWN) {
@@ -1484,6 +1475,15 @@ gst_va_compositor_update_caps (GstVideoAggregator * vagg, GstCaps * src_caps)
       gst_caps_set_features_simple (clip_caps,
           gst_caps_features_new_single_static_str
           (GST_CAPS_FEATURE_MEMORY_DMABUF));
+    }
+  } else if (va_formats) {
+    if (best_va != GST_VIDEO_FORMAT_UNKNOWN) {
+      clip_caps = _caps_from_format_and_feature (best_va,
+          DRM_FORMAT_MOD_INVALID, GST_CAPS_FEATURE_MEMORY_VA);
+    } else {
+      clip_caps = gst_caps_new_empty_simple ("video/x-raw");
+      gst_caps_set_features_simple (clip_caps,
+          gst_caps_features_new_single_static_str (GST_CAPS_FEATURE_MEMORY_VA));
     }
   } else if (sys_formats) {
     if (best_sys != GST_VIDEO_FORMAT_UNKNOWN) {
