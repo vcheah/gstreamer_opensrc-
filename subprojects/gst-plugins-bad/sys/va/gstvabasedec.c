@@ -853,50 +853,173 @@ _caps_video_format_from_chroma (GstCaps * caps, guint chroma_type)
   return GST_VIDEO_FORMAT_UNKNOWN;
 }
 
-/* Query downstream for its VA display, and check whether it is different
- * from ours. Only when downstream is a VA element bound to a *different*
- * VA display does it make sense to prefer DMABuf over VAMemory (since
- * VASurfaces created on one display cannot be shared with another one).
- * For non-VA downstream (no context returned) or downstream sharing our
- * display, keep the original VAMemory-first preference order so that
- * pipelines like "vadec ! vapostproc" avoid the export/import overhead
- * of DMABuf. */
+/* Ask @peer_elem directly for its own VA display, without letting the
+ * query be forwarded further downstream. VA elements answer CONTEXT
+ * queries from their own sink_query handler using their local display
+ * (see gst_va_*_sink_query / _query_context in this file and the
+ * encoder/transform counterparts), so a direct gst_element_query()
+ * gives us the *per-element* VADisplay handle, even through a tee.
+ *
+ * Returns the raw VADisplay handle (gpointer) or NULL if the element
+ * has no VA display (non-VA element, or VA element not yet opened). */
+static gpointer
+_peek_element_va_dpy (GstElement * peer_elem)
+{
+  GstQuery *q;
+  GstContext *ctxt = NULL;
+  gpointer va_dpy = NULL;
+
+  q = gst_query_new_context (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
+  if (gst_element_query (peer_elem, q)) {
+    gst_query_parse_context (q, &ctxt);
+    if (ctxt) {
+      const GstStructure *s = gst_context_get_structure (ctxt);
+      GstObject *gst_display = NULL;
+
+      if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT, &gst_display,
+              NULL)) {
+        if (GST_IS_VA_DISPLAY (gst_display))
+          va_dpy = gst_va_display_get_va_dpy (GST_VA_DISPLAY (gst_display));
+        gst_object_unref (gst_display);
+      } else {
+        gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy, NULL);
+      }
+    }
+  }
+  gst_query_unref (q);
+
+  return va_dpy;
+}
+
+/* Walks downstream from @pad looking for any VA element whose VADisplay
+ * handle differs from @our_va_dpy. Recurses through every internal src
+ * pad of every visited element, so it correctly fans out across
+ * tee/queue/bin topologies (e.g. "vadec ! tee ! [vaenc(dpy1), vaenc(dpy2)]").
+ *
+ * We identify "VA-ness" via the "device-path" GObject property that every
+ * VA element exposes. The actual comparison is done on the raw VADisplay
+ * handle: two elements may share the same render node path but hold
+ * independent VADisplay handles (separate vaInitialize sessions), in
+ * which case VASurfaces are not interchangeable between them. */
+static gboolean
+_downstream_walk_for_different_display (GstPad * pad, gpointer our_va_dpy,
+    GHashTable * visited)
+{
+  GstPad *peer;
+  GstElement *peer_elem;
+  GstIterator *iter;
+  GValue item = G_VALUE_INIT;
+  gboolean done = FALSE, different = FALSE;
+
+  peer = gst_pad_get_peer (pad);
+  if (!peer)
+    return FALSE;
+
+  /* Avoid revisiting the same pad (cycles, multiple ghost-pad paths). */
+  if (!g_hash_table_add (visited, peer)) {
+    gst_object_unref (peer);
+    return FALSE;
+  }
+
+  peer_elem = gst_pad_get_parent_element (peer);
+  if (!peer_elem) {
+    gst_object_unref (peer);
+    return FALSE;
+  }
+
+  /* If this element is a VA element, compare its actual VADisplay handle
+   * (not just the device path: distinct VADisplay sessions on the same
+   * render node still cannot share VASurfaces). */
+  if (g_object_class_find_property (G_OBJECT_GET_CLASS (peer_elem),
+          "device-path")) {
+    gpointer peer_va_dpy = _peek_element_va_dpy (peer_elem);
+
+    if (peer_va_dpy && peer_va_dpy != our_va_dpy) {
+      GST_DEBUG_OBJECT (peer_elem,
+          "downstream VA element has a different VADisplay handle %p "
+          "(ours %p)", peer_va_dpy, our_va_dpy);
+      different = TRUE;
+    }
+  }
+
+  if (different)
+    goto out;
+
+  /* Recurse through every internal src pad. For a normal element this is
+   * 1:1; for tee it fans out across every branch; for a bin it crosses
+   * the ghost-pad boundary. */
+  iter = gst_pad_iterate_internal_links (peer);
+  if (!iter)
+    goto out;
+
+  while (!done) {
+    switch (gst_iterator_next (iter, &item)) {
+      case GST_ITERATOR_OK:{
+        GstPad *internal = g_value_get_object (&item);
+
+        if (GST_PAD_DIRECTION (internal) == GST_PAD_SRC
+            && _downstream_walk_for_different_display (internal, our_va_dpy,
+                visited)) {
+          different = TRUE;
+          done = TRUE;
+        }
+        g_value_reset (&item);
+        break;
+      }
+      case GST_ITERATOR_RESYNC:
+        gst_iterator_resync (iter);
+        break;
+      case GST_ITERATOR_DONE:
+      case GST_ITERATOR_ERROR:
+        done = TRUE;
+        break;
+    }
+  }
+  g_value_unset (&item);
+  gst_iterator_free (iter);
+
+out:
+  gst_object_unref (peer_elem);
+  gst_object_unref (peer);
+  return different;
+}
+
+/* Returns TRUE iff at least one downstream VA element is bound to a
+ * VADisplay handle different from ours. Only in that case does it make
+ * sense to prefer DMABuf over VAMemory: VASurfaces cannot be shared
+ * across distinct VADisplay sessions (even on the same render node),
+ * so for cross-display branches DMABuf is the only zero-/low-copy
+ * option. For non-VA downstream, or downstream sharing our display,
+ * keep the VAMemory-first preference so pipelines like
+ * "vadec ! vapostproc" avoid DMABuf's export/import overhead.
+ *
+ * The walk handles fan-out topologies (tee, queue, sub-bins): if *any*
+ * downstream branch reaches a VA element on a different VADisplay, we
+ * report "different" so that branch can import the frames. */
 static gboolean
 _downstream_has_different_va_display (GstVaBaseDec * base)
 {
-  GstQuery *query;
-  GstContext *ctxt = NULL;
-  gboolean different = FALSE;
+  GstPad *srcpad;
+  gpointer our_va_dpy;
+  GHashTable *visited;
+  gboolean different;
 
   if (!base->display)
     return FALSE;
 
-  query = gst_query_new_context (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
-  if (gst_pad_peer_query (GST_VIDEO_DECODER_SRC_PAD (base), query)) {
-    gst_query_parse_context (query, &ctxt);
-    if (ctxt) {
-      const GstStructure *s = gst_context_get_structure (ctxt);
-      GstObject *downstream_display = NULL;
-      gpointer va_dpy = NULL;
+  srcpad = GST_VIDEO_DECODER_SRC_PAD (base);
+  if (!srcpad)
+    return FALSE;
 
-      if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT,
-              &downstream_display, NULL)) {
-        if (GST_IS_VA_DISPLAY (downstream_display)) {
-          different = (gst_va_display_get_va_dpy (GST_VA_DISPLAY
-                  (downstream_display)) !=
-              gst_va_display_get_va_dpy (base->display));
-        }
-        gst_object_unref (downstream_display);
-      } else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
-              NULL)) {
-        different = (va_dpy != gst_va_display_get_va_dpy (base->display));
-      }
-    }
-  }
-  gst_query_unref (query);
+  our_va_dpy = gst_va_display_get_va_dpy (base->display);
 
-  GST_DEBUG_OBJECT (base, "downstream VA display is %s",
-      different ? "different" : "same or not VA");
+  visited = g_hash_table_new (NULL, NULL);
+  different =
+      _downstream_walk_for_different_display (srcpad, our_va_dpy, visited);
+  g_hash_table_destroy (visited);
+
+  GST_DEBUG_OBJECT (base, "downstream VA display(s) are %s (ours %p)",
+      different ? "different" : "matching or absent", our_va_dpy);
 
   return different;
 }
