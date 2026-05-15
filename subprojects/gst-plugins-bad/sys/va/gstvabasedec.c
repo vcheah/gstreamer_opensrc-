@@ -853,9 +853,53 @@ _caps_video_format_from_chroma (GstCaps * caps, guint chroma_type)
   return GST_VIDEO_FORMAT_UNKNOWN;
 }
 
-/* ordered list of capsfeature preference */
-enum
-{ DMABUF, VA, SYSMEM };
+/* Query downstream for its VA display, and check whether it is different
+ * from ours. Only when downstream is a VA element bound to a *different*
+ * VA display does it make sense to prefer DMABuf over VAMemory (since
+ * VASurfaces created on one display cannot be shared with another one).
+ * For non-VA downstream (no context returned) or downstream sharing our
+ * display, keep the original VAMemory-first preference order so that
+ * pipelines like "vadec ! vapostproc" avoid the export/import overhead
+ * of DMABuf. */
+static gboolean
+_downstream_has_different_va_display (GstVaBaseDec * base)
+{
+  GstQuery *query;
+  GstContext *ctxt = NULL;
+  gboolean different = FALSE;
+
+  if (!base->display)
+    return FALSE;
+
+  query = gst_query_new_context (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
+  if (gst_pad_peer_query (GST_VIDEO_DECODER_SRC_PAD (base), query)) {
+    gst_query_parse_context (query, &ctxt);
+    if (ctxt) {
+      const GstStructure *s = gst_context_get_structure (ctxt);
+      GstObject *downstream_display = NULL;
+      gpointer va_dpy = NULL;
+
+      if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT,
+              &downstream_display, NULL)) {
+        if (GST_IS_VA_DISPLAY (downstream_display)) {
+          different = (gst_va_display_get_va_dpy (GST_VA_DISPLAY
+                  (downstream_display)) !=
+              gst_va_display_get_va_dpy (base->display));
+        }
+        gst_object_unref (downstream_display);
+      } else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
+              NULL)) {
+        different = (va_dpy != gst_va_display_get_va_dpy (base->display));
+      }
+    }
+  }
+  gst_query_unref (query);
+
+  GST_DEBUG_OBJECT (base, "downstream VA display is %s",
+      different ? "different" : "same or not VA");
+
+  return different;
+}
 
 void
 gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
@@ -868,13 +912,24 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
   gboolean is_any;
   GstIdStr sysmem = GST_ID_STR_INIT, dmabuf = GST_ID_STR_INIT, va =
       GST_ID_STR_INIT;
-  const GstIdStr *feats[] = { &dmabuf, &va, &sysmem };
+  /* Default preference: VAMemory first, since it avoids the export/import
+   * overhead inherent in DMABuf when downstream shares our VA display
+   * (e.g. "vadec ! vapostproc") or is not a VA element at all.
+   * Only when downstream is a VA element on a *different* display do we
+   * promote DMABuf to first place, since VASurfaces cannot be shared
+   * across displays. */
+  const GstIdStr *feats_va_first[] = { &va, &dmabuf, &sysmem };
+  const GstIdStr *feats_dma_first[] = { &dmabuf, &va, &sysmem };
+  const GstIdStr **feats;
 
   gst_id_str_set_static_str (&sysmem, GST_CAPS_FEATURE_MEMORY_SYSTEM_MEMORY);
   gst_id_str_set_static_str (&dmabuf, GST_CAPS_FEATURE_MEMORY_DMABUF);
   gst_id_str_set_static_str (&va, GST_CAPS_FEATURE_MEMORY_VA);
 
   g_return_if_fail (base);
+
+  feats = _downstream_has_different_va_display (base) ?
+      feats_dma_first : feats_va_first;
 
   /* verify if peer caps is any */
   {
@@ -907,7 +962,9 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
   /* iterate allowed caps to find the first "capable" capability according our
    * ordered list of preferred caps features */
   num_structures = gst_caps_get_size (allowed_caps);
-  for (i = 0; i < G_N_ELEMENTS (feats); i++) {
+  for (i = 0; i < G_N_ELEMENTS (feats_va_first); i++) {
+    gboolean is_dmabuf = (feats[i] == &dmabuf);
+
     for (j = 0; j < num_structures; j++) {
       GstStructure *structure;
       const GValue *formats;
@@ -919,13 +976,13 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
         continue;
 
       structure = gst_caps_get_structure (allowed_caps, j);
-      if (i == DMABUF)
+      if (is_dmabuf)
         formats = gst_structure_get_value (structure, "drm-format");
       else
         formats = gst_structure_get_value (structure, "format");
 
       fmt = _find_video_format_from_chroma (formats, base->rt_format,
-          i == DMABUF, &mod);
+          is_dmabuf, &mod);
 
       /* if doesn't found a proper format let's try other structure */
       if (fmt == GST_VIDEO_FORMAT_UNKNOWN)
@@ -933,7 +990,7 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
 
       if (format)
         *format = fmt;
-      if (i == DMABUF && modifier)
+      if (is_dmabuf && modifier)
         *modifier = mod;
       if (capsfeatures)
         *capsfeatures = gst_caps_features_new_id_str (feats[i], NULL);
@@ -943,7 +1000,7 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
   }
 
   /* no matching format, let's fail */
-  if (i == G_N_ELEMENTS (feats))
+  if (i == G_N_ELEMENTS (feats_va_first))
     *format = GST_VIDEO_FORMAT_UNKNOWN;
 
 bail:
