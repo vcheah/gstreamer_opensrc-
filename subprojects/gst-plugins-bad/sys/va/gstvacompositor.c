@@ -908,6 +908,7 @@ gst_va_compositor_sample_next (gpointer data)
   GstVaCompositorPad *pad;
   GstBuffer *inbuf;
   GstBuffer *buf;
+  GstBuffer *prepared_buf;
   GstFlowReturn res;
   GstVideoCropMeta *crop = NULL;
 
@@ -934,7 +935,13 @@ gst_va_compositor_sample_next (gpointer data)
     inbuf = gst_video_aggregator_pad_get_current_buffer (vaggpad);
     pad = GST_VA_COMPOSITOR_PAD (vaggpad);
 
-    res = gst_va_compositor_import_buffer (generator->comp, pad, inbuf, &buf);
+    prepared_buf = gst_va_buffer_prepare_for_import (inbuf,
+        generator->comp->display);
+    if (!prepared_buf)
+      return &generator->sample;
+
+    res = gst_va_compositor_import_buffer (generator->comp, pad,
+        prepared_buf, &buf);
     if (res != GST_FLOW_OK)
       return &generator->sample;
 
@@ -944,6 +951,7 @@ gst_va_compositor_sample_next (gpointer data)
     /* *INDENT-OFF* */
     generator->sample = (GstVaComposeSample) {
       .buffer = buf,
+      .wrapped_buffer = (inbuf != prepared_buf)? prepared_buf : NULL,
       .input_region = (VARectangle) {
         .x = crop ? crop->x : 0,
         .y = crop ? crop->y : 0,
