@@ -144,6 +144,7 @@ gst_va_buffer_importer_import (GstVaBufferImporter * importer,
   if (ret != GST_FLOW_OK)
     return ret;
 
+  GST_ERROR(YELLOW "[bckcheah] gstvabase: copy-ing input frame >>>>>>" RESET);
   GST_LOG_OBJECT (importer->element, "copying input frame");
 
   if (!gst_video_frame_map (&in_frame, importer->in_info, inbuf, GST_MAP_READ))
