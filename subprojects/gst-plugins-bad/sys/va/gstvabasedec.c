@@ -861,11 +861,9 @@ _caps_video_format_from_chroma (GstCaps * caps, guint chroma_type)
 enum
 { VA, DMABUF, SYSMEM };
 
-
 static gboolean
 _downstream_has_different_va_display (GstVaBaseDec * base)
 {
-
   GstQuery *query;
   GstContext *ctxt = NULL;
   gboolean different = FALSE;
@@ -880,205 +878,195 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
       const GstStructure *s = gst_context_get_structure (ctxt);
       GstObject *downstream_display = NULL;
       gpointer va_dpy = NULL;
+      VADisplay my_va_dpy = gst_va_display_get_va_dpy (base->display);
 
       GST_ERROR (GREEN "[bkcheah] Decoder has Context >>>>" RESET);
+
+      // Check modern gst-display first
       if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT,
               &downstream_display, NULL)) {
         GST_ERROR (GREEN "[bkcheah] Decoder has gst-display >>>>" RESET);
-        if (GST_IS_VA_DISPLAY (downstream_display)) {
-          GST_ERROR (GREEN
-              "[bkcheah] Decoder downstream_display @has-vadpy >>>>" RESET);
-          GST_ERROR (RED
-              "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==DOWNLOAD==) VADisplay: 0x%lx"
-              RESET, (unsigned long) gst_va_display_get_va_dpy (base->display),
-              gst_va_display_get_va_dpy (GST_VA_DISPLAY (downstream_display)));
 
-          different = (gst_va_display_get_va_dpy (GST_VA_DISPLAY
-                  (downstream_display)) !=
-              gst_va_display_get_va_dpy (base->display));
+        if (GST_IS_VA_DISPLAY (downstream_display)) {
+          VADisplay downstream_va_dpy =
+              gst_va_display_get_va_dpy (GST_VA_DISPLAY (downstream_display));
+
+          GST_ERROR (GREEN "[bkcheah] Decoder downstream_display @has-vadpy >>>>" RESET);
+          GST_ERROR (RED "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==DOWNLOAD==) VADisplay: 0x%lx" RESET,
+              (unsigned long) my_va_dpy, (unsigned long) downstream_va_dpy);
+
+          different = (downstream_va_dpy != my_va_dpy);
         }
         gst_object_unref (downstream_display);
-      } else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
-              NULL)) {
-        different = (va_dpy != gst_va_display_get_va_dpy (base->display));
+      }
+      // Check legacy va-display
+      else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy, NULL)) {
+        GST_ERROR (GREEN "[bkcheah] Found legacy va-display pointer" RESET);
+        GST_ERROR (RED "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==LEGACY==) VADisplay: 0x%lx" RESET,
+            (unsigned long) my_va_dpy, (unsigned long) va_dpy);
+        different = (va_dpy != my_va_dpy);
       }
     }
   }
   gst_query_unref (query);
 
-  GST_DEBUG_OBJECT (base, "downstream VA display is %s",
-      different ? "different" : "same or not VA");
+  GST_ERROR (GREEN "[bkcheah] Downstream VA display is %s" RESET,
+      different ? "DIFFERENT" : "SAME or not VA");
 
   return different;
 }
 
-static gboolean _check_all_downstream_va_displays (GstVaBaseDec * base);
+static gboolean
+_check_branch_va_display (GstPad *pad, GstVaBaseDec *base, int branch_num)
+{
+  GstQuery *query = gst_query_new_context (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
+  gboolean different = FALSE;
 
-// Complete implementation
+  GST_ERROR (GREEN "[bkcheah] Checking tee branch %d" RESET, branch_num);
+
+  if (gst_pad_peer_query (pad, query)) {
+    GstContext *ctxt = NULL;
+    gst_query_parse_context (query, &ctxt);
+
+    if (ctxt) {
+      const GstStructure *s = gst_context_get_structure (ctxt);
+      GstObject *downstream_display = NULL;
+      gpointer va_dpy = NULL;
+      VADisplay my_va_dpy = gst_va_display_get_va_dpy (base->display);
+
+      GST_ERROR (GREEN "[bkcheah] Branch %d has context" RESET, branch_num);
+
+      if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT,
+              &downstream_display, NULL)) {
+        GST_ERROR (GREEN "[bkcheah] Branch %d has gst-display" RESET, branch_num);
+
+        if (GST_IS_VA_DISPLAY (downstream_display)) {
+          VADisplay downstream_va_dpy =
+              gst_va_display_get_va_dpy (GST_VA_DISPLAY (downstream_display));
+
+          GST_ERROR (GREEN "[bkcheah] Branch %d VADisplay: %p (mine: %p)" RESET,
+              branch_num, downstream_va_dpy, my_va_dpy);
+
+          different = (downstream_va_dpy != my_va_dpy);
+
+          if (different) {
+            GST_ERROR (RED "[bkcheah] Branch %d has DIFFERENT VA display!" RESET, branch_num);
+          } else {
+            GST_ERROR (GREEN "[bkcheah] Branch %d has SAME VA display" RESET, branch_num);
+          }
+        }
+        gst_object_unref (downstream_display);
+      }
+      else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy, NULL)) {
+        GST_ERROR (GREEN "[bkcheah] Branch %d legacy VADisplay: %p (mine: %p)" RESET,
+            branch_num, va_dpy, my_va_dpy);
+
+        different = (va_dpy != my_va_dpy);
+
+        if (different) {
+          GST_ERROR (RED "[bkcheah] Branch %d has DIFFERENT legacy VA display!" RESET, branch_num);
+        } else {
+          GST_ERROR (GREEN "[bkcheah] Branch %d has SAME legacy VA display" RESET, branch_num);
+        }
+      } else {
+        GST_ERROR (GREEN "[bkcheah] Branch %d context has no VA display info" RESET, branch_num);
+      }
+    } else {
+      GST_ERROR (GREEN "[bkcheah] Branch %d query succeeded but no context" RESET, branch_num);
+    }
+  } else {
+    GST_ERROR (GREEN "[bkcheah] Branch %d query failed (no VA context downstream)" RESET, branch_num);
+  }
+
+  gst_query_unref (query);
+  return different;
+}
+
 static gboolean
 _check_all_downstream_va_displays (GstVaBaseDec * base)
 {
-  GstPad *src_pad = GST_VIDEO_DECODER_SRC_PAD (base);
-  GstPad *peer_pad = gst_pad_get_peer (src_pad);
+  GstPad *src_pad, *peer_pad;
+  GstElement *peer_element;
+  GstElementFactory *factory;
+  const gchar *factory_name;
   gboolean found_different = FALSE;
 
   if (!base->display) {
-    GST_WARNING_OBJECT (base, "No VA display in decoder");
+    GST_ERROR (RED "[bkcheah] No VA display in decoder" RESET);
     return FALSE;
   }
 
-  if (peer_pad) {
-    GstElement *peer_element = gst_pad_get_parent_element (peer_pad);
-
-    if (peer_element) {
-      // Check if next element is tee (portable way)
-      GstElementFactory *factory = gst_element_get_factory (peer_element);
-      const gchar *factory_name =
-          gst_plugin_feature_get_name (GST_PLUGIN_FEATURE (factory));
-
-      if (g_strcmp0 (factory_name, "tee") == 0) {
-        GST_ERROR (GREEN "[bkcheah] Found tee element, checking all branches"
-            RESET);
-
-        GstIterator *iter = gst_element_iterate_src_pads (peer_element);
-        GValue item = G_VALUE_INIT;
-        gboolean done = FALSE;
-        int branch_count = 0;
-
-        while (!done) {
-          switch (gst_iterator_next (iter, &item)) {
-            case GST_ITERATOR_OK:{
-              GstPad *tee_sink = g_value_get_object (&item);
-              branch_count++;
-
-              GST_ERROR (GREEN "[bkcheah] Checking tee branch %d" RESET,
-                  branch_count);
-
-              // Query this specific branch
-              GstQuery *query =
-                  gst_query_new_context
-                  (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
-              if (gst_pad_peer_query (tee_sink, query)) {
-                GstContext *ctxt = NULL;
-                gst_query_parse_context (query, &ctxt);
-
-                if (ctxt) {
-                  const GstStructure *s = gst_context_get_structure (ctxt);
-                  GstObject *downstream_display = NULL;
-                  gpointer va_dpy = NULL;
-
-                  GST_ERROR (GREEN "[bkcheah] Branch %d has context" RESET,
-                      branch_count);
-
-                  // Check for modern gst-display
-                  if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT,
-                          &downstream_display, NULL)) {
-                    GST_ERROR (GREEN "[bkcheah] Branch %d has gst-display"
-                        RESET, branch_count);
-
-                    if (GST_IS_VA_DISPLAY (downstream_display)) {
-                      VADisplay downstream_va_dpy =
-                          gst_va_display_get_va_dpy (GST_VA_DISPLAY
-                          (downstream_display));
-                      VADisplay my_va_dpy =
-                          gst_va_display_get_va_dpy (base->display);
-
-                      GST_ERROR (GREEN
-                          "[bkcheah] Branch %d VADisplay: %p (mine: %p)" RESET,
-                          branch_count, downstream_va_dpy, my_va_dpy);
-
-                      if (downstream_va_dpy != my_va_dpy) {
-                        GST_ERROR (GREEN
-                            "[bkcheah] Branch %d has DIFFERENT VA display!"
-                            RESET, branch_count);
-                        found_different = TRUE;
-                      } else {
-                        GST_ERROR (GREEN
-                            "[bkcheah] Branch %d has SAME VA display" RESET,
-                            branch_count);
-                      }
-                    }
-                    gst_object_unref (downstream_display);
-                  }
-                  // Check for legacy va-display
-                  else if (gst_structure_get (s, "va-display", G_TYPE_POINTER,
-                          &va_dpy, NULL)) {
-                    VADisplay my_va_dpy =
-                        gst_va_display_get_va_dpy (base->display);
-
-                    GST_ERROR (GREEN
-                        "[bkcheah] Branch %d legacy VADisplay: %p (mine: %p)"
-                        RESET, branch_count, va_dpy, my_va_dpy);
-
-                    if (va_dpy != my_va_dpy) {
-                      GST_ERROR (GREEN
-                          "[bkcheah] Branch %d has DIFFERENT legacy VA display!"
-                          RESET, branch_count);
-                      found_different = TRUE;
-                    } else {
-                      GST_ERROR (GREEN
-                          "[bkcheah] Branch %d has SAME legacy VA display"
-                          RESET, branch_count);
-                    }
-                  } else {
-                    GST_ERROR (GREEN
-                        "[bkcheah] Branch %d context has no VA display info"
-                        RESET, branch_count);
-                  }
-                } else {
-                  GST_ERROR (GREEN
-                      "[bkcheah] Branch %d query succeeded but no context"
-                      RESET, branch_count);
-                }
-              } else {
-                GST_ERROR (GREEN
-                    "[bkcheah] Branch %d query failed (no VA context downstream)"
-                    RESET, branch_count);
-              }
-
-              gst_query_unref (query);
-              g_value_reset (&item);
-              break;
-            }
-            case GST_ITERATOR_RESYNC:
-              GST_ERROR (GREEN "[bkcheah] Iterator resync, restarting" RESET);
-              gst_iterator_resync (iter);
-              break;
-            case GST_ITERATOR_ERROR:
-              GST_ERROR (GREEN "[bkcheah] Iterator error" RESET);
-              done = TRUE;
-              break;
-            case GST_ITERATOR_DONE:
-              GST_ERROR (GREEN "[bkcheah] Iterator done, checked %d branches"
-                  RESET, branch_count);
-              done = TRUE;
-              break;
-          }
-        }
-
-        g_value_unset (&item);
-        gst_iterator_free (iter);
-      } else {
-        // Not a tee, fall back to original single query
-        GST_ERROR (GREEN
-            "[bkcheah] Next element is %s (not tee), using single query" RESET,
-            factory_name);
-        found_different = _downstream_has_different_va_display (base);
-      }
-
-      gst_object_unref (peer_element);
-    }
-    gst_object_unref (peer_pad);
-  } else {
+  src_pad = GST_VIDEO_DECODER_SRC_PAD (base);
+  peer_pad = gst_pad_get_peer (src_pad);
+  if (!peer_pad) {
     GST_ERROR (GREEN "[bkcheah] No peer pad found" RESET);
+    return FALSE;
   }
+
+  peer_element = gst_pad_get_parent_element (peer_pad);
+  if (!peer_element) {
+    GST_ERROR (RED "[bkcheah] No peer element found" RESET);
+    gst_object_unref (peer_pad);
+    return FALSE;
+  }
+
+  factory = gst_element_get_factory (peer_element);
+  factory_name = gst_plugin_feature_get_name (GST_PLUGIN_FEATURE (factory));
+
+  // Handle tee element specially
+  if (g_strcmp0 (factory_name, "tee") == 0) {
+    GST_ERROR (GREEN "[bkcheah] Found tee element, checking all branches" RESET);
+
+    GstIterator *iter = gst_element_iterate_src_pads (peer_element);
+    GValue item = G_VALUE_INIT;
+    gboolean done = FALSE;
+    int branch_count = 0;
+
+    while (!done) {
+      switch (gst_iterator_next (iter, &item)) {
+        case GST_ITERATOR_OK: {
+          GstPad *tee_pad = g_value_get_object (&item);
+          branch_count++;
+
+          if (_check_branch_va_display (tee_pad, base, branch_count)) {
+            found_different = TRUE;
+          }
+
+          g_value_reset (&item);
+          break;
+        }
+        case GST_ITERATOR_RESYNC:
+          GST_ERROR (GREEN "[bkcheah] Iterator resync, restarting" RESET);
+          gst_iterator_resync (iter);
+          break;
+        case GST_ITERATOR_ERROR:
+          GST_ERROR (RED "[bkcheah] Iterator error" RESET);
+          done = TRUE;
+          break;
+        case GST_ITERATOR_DONE:
+          GST_ERROR (GREEN "[bkcheah] Iterator done, checked %d branches" RESET, branch_count);
+          done = TRUE;
+          break;
+      }
+    }
+
+    g_value_unset (&item);
+    gst_iterator_free (iter);
+  } else if (!g_strcmp0 (factory_name, "capsfilter") == 0) {
+    // Single downstream element
+    GST_ERROR (GREEN "[bkcheah] Next element is %s (not tee), using single query" RESET, factory_name);
+    found_different = _downstream_has_different_va_display (base);
+  }
+
+  gst_object_unref (peer_element);
+  gst_object_unref (peer_pad);
 
   GST_ERROR (GREEN "[bkcheah] Final result: %s VA displays found" RESET,
       found_different ? "DIFFERENT" : "SAME/NO");
 
   return found_different;
 }
-
+	
 void
 gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
     GstVideoFormat * format, GstCapsFeatures ** capsfeatures,
