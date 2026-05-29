@@ -862,6 +862,28 @@ enum
 { VA, DMABUF, SYSMEM };
 
 static gboolean
+_is_connected_to_tee (GstVaBaseDec * base)
+{
+  GstPad *peer_pad;
+  GstElement *peer_element;
+  gboolean is_tee = FALSE;
+
+  peer_pad = gst_pad_get_peer (GST_VIDEO_DECODER_SRC_PAD (base));
+  if (peer_pad) {
+    peer_element = gst_pad_get_parent_element (peer_pad);
+
+    if (peer_element) {
+      is_tee = g_str_equal (G_OBJECT_TYPE_NAME (peer_element), "GstTee");
+      gst_object_unref (peer_element);
+    }
+
+    gst_object_unref (peer_pad);
+  }
+
+  return is_tee;
+}
+
+static gboolean
 _downstream_has_different_va_display (GstVaBaseDec * base)
 {
   GstQuery *query;
@@ -870,6 +892,11 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
 
   if (!base->display)
     return FALSE;
+
+  if (_is_connected_to_tee (base)) {
+    GST_ERROR (RED "[bkcheah] tee detected set same dpy >>>>" RESET);
+    return FALSE;
+  }
 
   query = gst_query_new_context (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
   if (gst_pad_peer_query (GST_VIDEO_DECODER_SRC_PAD (base), query)) {
@@ -900,8 +927,7 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
           different = (downstream_va_dpy != my_va_dpy);
         }
         gst_object_unref (downstream_display);
-      }
-      else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
+      } else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
               NULL)) {
         GST_ERROR (GREEN "[bkcheah] Found legacy va-display pointer" RESET);
         GST_ERROR (RED
@@ -934,6 +960,9 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
   const GstIdStr *feats_va_first[] = { &va, &dmabuf, &sysmem };
   const GstIdStr *feats_dma_first[] = { &dmabuf, &va, &sysmem };
   const GstIdStr **feats;
+
+  G_STATIC_ASSERT (G_N_ELEMENTS (feats_dma_first) ==
+      G_N_ELEMENTS (feats_va_first));
 
   gst_id_str_set_static_str (&sysmem, GST_CAPS_FEATURE_MEMORY_SYSTEM_MEMORY);
   gst_id_str_set_static_str (&dmabuf, GST_CAPS_FEATURE_MEMORY_DMABUF);
