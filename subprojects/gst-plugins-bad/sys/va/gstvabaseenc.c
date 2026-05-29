@@ -101,6 +101,9 @@ gst_va_base_enc_open (GstVideoEncoder * venc)
           &base->display))
     return FALSE;
 
+  VADisplay va_dpy = gst_va_display_get_va_dpy(base->display);
+  GST_ERROR(RED "[bkcheah] (ENC) VADisplay: 0x%lx" RESET, (unsigned long)va_dpy);
+
   g_object_notify (G_OBJECT (base), "device-path");
 
   if (!g_atomic_pointer_get (&base->encoder)) {

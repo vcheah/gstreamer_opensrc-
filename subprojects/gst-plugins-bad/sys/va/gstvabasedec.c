@@ -80,6 +80,10 @@ gst_va_base_dec_open (GstVideoDecoder * decoder)
     ret = TRUE;
   }
 
+  VADisplay va_dpy = gst_va_display_get_va_dpy (base->display);
+  GST_ERROR (RED "[bkcheah] (==DEC==) VADisplay: 0x%lx" RESET,
+      (unsigned long) va_dpy);
+
   base->apply_video_crop = FALSE;
 
   return ret;
@@ -876,6 +880,8 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
       gpointer va_dpy = NULL;
       VADisplay my_va_dpy = gst_va_display_get_va_dpy (base->display);
 
+      GST_ERROR (GREEN "[bkcheah] Decoder has Context >>>>" RESET);
+
       if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT,
               &downstream_display, NULL)) {
         GST_ERROR (GREEN "[bkcheah] Decoder has gst-display >>>>" RESET);
@@ -883,19 +889,31 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
         if (GST_IS_VA_DISPLAY (downstream_display)) {
           VADisplay downstream_va_dpy =
               gst_va_display_get_va_dpy (GST_VA_DISPLAY (downstream_display));
+
+          GST_ERROR (GREEN
+              "[bkcheah] Decoder downstream_display @has-vadpy >>>>" RESET);
+          GST_ERROR (RED
+              "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==DOWNLOAD==) VADisplay: 0x%lx"
+              RESET, (unsigned long) my_va_dpy,
+              (unsigned long) downstream_va_dpy);
+
           different = (downstream_va_dpy != my_va_dpy);
         }
         gst_object_unref (downstream_display);
       }
       else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
               NULL)) {
+        GST_ERROR (GREEN "[bkcheah] Found legacy va-display pointer" RESET);
+        GST_ERROR (RED
+            "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==LEGACY==) VADisplay: 0x%lx"
+            RESET, (unsigned long) my_va_dpy, (unsigned long) va_dpy);
         different = (va_dpy != my_va_dpy);
       }
     }
   }
   gst_query_unref (query);
 
-  GST_DEBUG_OBJECT (base, "downstream VA display is %s",
+  GST_ERROR_OBJECT (base, RED "downstream VA display is %s" RESET,
       different ? "different" : "same or not VA");
 
   return different;

@@ -365,6 +365,10 @@ gst_va_filter_open (GstVaFilter * self)
   if (gst_va_filter_is_open (self))
     return TRUE;
 
+  VADisplay va_dpy = gst_va_display_get_va_dpy (self->display);
+  GST_ERROR (RED "[bkcheah] (<< VP >>) VADisplay: 0x%lx" RESET,
+      (unsigned long) va_dpy);
+
   if (!gst_va_filter_ensure_config_attributes (self, &attrib.value))
     return FALSE;
 
