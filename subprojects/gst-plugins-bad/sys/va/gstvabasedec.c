@@ -864,44 +864,29 @@ enum
 static gboolean
 _has_downstream_tee (GstVaBaseDec * base)
 {
-  GstPad *pad, *src_pad;
+  GstPad *peer;
   GstElement *element;
-  GstElementFactory *factory;
-  const gchar *name;
+  guint n_src_pads;
+  gboolean result = FALSE;
 
-  /* Walk downstream, stepping through queue elements, to detect a tee
-   * that is not directly connected, e.g.: vah264dec ! queue ! tee */
-  pad = gst_pad_get_peer (GST_VIDEO_DECODER_SRC_PAD (base));
+  /* Check if the immediate downstream element is a fan-out element
+   * (numsrcpads > 1), e.g. a tee directly after the decoder. */
+  peer = gst_pad_get_peer (GST_VIDEO_DECODER_SRC_PAD (base));
+  if (!peer)
+    return FALSE;
 
-  while (pad) {
-    element = gst_pad_get_parent_element (pad);
-    gst_object_unref (pad);
-    pad = NULL;
+  element = gst_pad_get_parent_element (peer);
+  gst_object_unref (peer);
 
-    if (!element)
-      break;
-
-    factory = gst_element_get_factory (element);
-    name = factory ?
-        gst_plugin_feature_get_name (GST_PLUGIN_FEATURE (factory)) : NULL;
-
-    if (name && g_str_equal (name, "tee")) {
-      gst_object_unref (element);
-      return TRUE;
-    }
-
-    if (name && (g_str_equal (name, "queue") || g_str_equal (name, "queue2"))) {
-      src_pad = gst_element_get_static_pad (element, "src");
-      if (src_pad) {
-        pad = gst_pad_get_peer (src_pad);
-        gst_object_unref (src_pad);
-      }
-    }
-
+  if (element) {
+    GST_OBJECT_LOCK (element);
+    n_src_pads = GST_ELEMENT_CAST (element)->numsrcpads;
+    GST_OBJECT_UNLOCK (element);
+    result = (n_src_pads > 1);
     gst_object_unref (element);
   }
 
-  return FALSE;
+  return result;
 }
 
 static gboolean
