@@ -873,7 +873,9 @@ _is_connected_to_tee (GstVaBaseDec * base)
     peer_element = gst_pad_get_parent_element (peer_pad);
 
     if (peer_element) {
-      is_tee = g_str_equal (G_OBJECT_TYPE_NAME (peer_element), "GstTee");
+      GstElementFactory *factory = gst_element_get_factory (peer_element);
+      is_tee = factory && g_str_equal (
+          gst_plugin_feature_get_name (GST_PLUGIN_FEATURE (factory)), "tee");
       gst_object_unref (peer_element);
     }
 
