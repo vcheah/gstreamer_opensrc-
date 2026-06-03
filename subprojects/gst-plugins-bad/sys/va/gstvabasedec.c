@@ -862,13 +862,12 @@ enum
 { VA, DMABUF, SYSMEM };
 
 static gboolean
-_is_connected_to_tee (GstVaBaseDec * base)
+_has_downstream_tee (GstVaBaseDec * base)
 {
-  GstPad *pad;
+  GstPad *pad, *src_pad;
   GstElement *element;
   GstElementFactory *factory;
-  const gchar *factory_name;
-  gboolean is_tee = FALSE;
+  const gchar *name;
 
   /* Walk downstream, stepping through queue elements, to detect a tee
    * that is not directly connected, e.g.: vah264dec ! queue ! tee */
@@ -883,15 +882,16 @@ _is_connected_to_tee (GstVaBaseDec * base)
       break;
 
     factory = gst_element_get_factory (element);
-    factory_name = factory ?
+    name = factory ?
         gst_plugin_feature_get_name (GST_PLUGIN_FEATURE (factory)) : NULL;
 
-    if (factory_name && g_str_equal (factory_name, "tee")) {
-      is_tee = TRUE;
-    } else if (factory_name &&
-        (g_str_equal (factory_name, "queue") ||
-            g_str_equal (factory_name, "queue2"))) {
-      GstPad *src_pad = gst_element_get_static_pad (element, "src");
+    if (name && g_str_equal (name, "tee")) {
+      gst_object_unref (element);
+      return TRUE;
+    }
+
+    if (name && (g_str_equal (name, "queue") || g_str_equal (name, "queue2"))) {
+      src_pad = gst_element_get_static_pad (element, "src");
       if (src_pad) {
         pad = gst_pad_get_peer (src_pad);
         gst_object_unref (src_pad);
@@ -901,7 +901,7 @@ _is_connected_to_tee (GstVaBaseDec * base)
     gst_object_unref (element);
   }
 
-  return is_tee;
+  return FALSE;
 }
 
 static gboolean
@@ -914,7 +914,7 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
   if (!base->display)
     return FALSE;
 
-  if (_is_connected_to_tee (base)) {
+  if (_has_downstream_tee (base)) {
     GST_ERROR (RED "[bkcheah] tee detected set same dpy >>>>" RESET);
     return FALSE;
     //return TRUE;
