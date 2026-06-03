@@ -896,6 +896,7 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
   if (_is_connected_to_tee (base)) {
     GST_ERROR (RED "[bkcheah] tee detected set same dpy >>>>" RESET);
     return FALSE;
+    //return TRUE;
   }
 
   query = gst_query_new_context (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
@@ -1001,6 +1002,8 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
     goto bail;
   }
 
+  GST_ERROR_OBJECT (base, CYAN "[bkcheah] downstream-caps %" GST_PTR_FORMAT RESET,allowed_caps);
+
   /* iterate allowed caps to find the first "capable" capability according our
    * ordered list of preferred caps features */
   num_structures = gst_caps_get_size (allowed_caps);
@@ -1013,6 +1016,8 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
       guint64 mod = 0;
 
       features = gst_caps_get_features (allowed_caps, j);
+      gchar *features_str = gst_caps_features_to_string (features);
+      GST_ERROR ( CYAN "[bkcheah][LOOP] Structure %d features: %s" RESET, j, features_str);
       if (!gst_caps_features_contains_id_str (features, feats[i]))
         continue;
 
@@ -1275,7 +1280,7 @@ gst_va_base_dec_set_output_state (GstVaBaseDec * base)
   if (capsfeatures)
     gst_caps_set_features_simple (base->output_state->caps, capsfeatures);
 
-  GST_INFO_OBJECT (base, "Negotiated caps %" GST_PTR_FORMAT,
+  GST_ERROR_OBJECT (base, CYAN "[bkcheah] Negotiated caps %" GST_PTR_FORMAT RESET,
       base->output_state->caps);
 
   return TRUE;
