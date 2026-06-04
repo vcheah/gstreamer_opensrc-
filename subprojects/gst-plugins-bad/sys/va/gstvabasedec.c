@@ -909,7 +909,7 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
       const GstStructure *s = gst_context_get_structure (ctxt);
       GstObject *downstream_display = NULL;
       gpointer va_dpy = NULL;
-      VADisplay my_va_dpy = gst_va_display_get_va_dpy (base->display);
+      VADisplay dec_va_dpy = gst_va_display_get_va_dpy (base->display);
 
       GST_ERROR (GREEN "[bkcheah] Decoder has Context >>>>" RESET);
 
@@ -925,10 +925,10 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
               "[bkcheah] Decoder downstream_display @has-vadpy >>>>" RESET);
           GST_ERROR (RED
               "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==DOWNLOAD==) VADisplay: 0x%lx"
-              RESET, (unsigned long) my_va_dpy,
+              RESET, (unsigned long) dec_va_dpy,
               (unsigned long) downstream_va_dpy);
 
-          different = (downstream_va_dpy != my_va_dpy);
+          different = (downstream_va_dpy != dec_va_dpy);
         }
         gst_object_unref (downstream_display);
       } else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
@@ -936,8 +936,8 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
         GST_ERROR (GREEN "[bkcheah] Found legacy va-display pointer" RESET);
         GST_ERROR (RED
             "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==LEGACY==) VADisplay: 0x%lx"
-            RESET, (unsigned long) my_va_dpy, (unsigned long) va_dpy);
-        different = (va_dpy != my_va_dpy);
+            RESET, (unsigned long) dec_va_dpy, (unsigned long) va_dpy);
+        different = (va_dpy != dec_va_dpy);
       }
     }
   }
