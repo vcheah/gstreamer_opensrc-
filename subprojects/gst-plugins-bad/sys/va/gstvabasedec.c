@@ -80,10 +80,6 @@ gst_va_base_dec_open (GstVideoDecoder * decoder)
     ret = TRUE;
   }
 
-  VADisplay va_dpy = gst_va_display_get_va_dpy (base->display);
-  GST_ERROR (RED "[bkcheah] (==DEC==) VADisplay: 0x%lx" RESET,
-      (unsigned long) va_dpy);
-
   base->apply_video_crop = FALSE;
 
   return ret;
@@ -857,34 +853,46 @@ _caps_video_format_from_chroma (GstCaps * caps, guint chroma_type)
   return GST_VIDEO_FORMAT_UNKNOWN;
 }
 
-/* ordered list of capsfeature preference */
-enum
-{ VA, DMABUF, SYSMEM };
-
 static gboolean
 _downstream_has_fanout (GstVaBaseDec * base)
 {
-  GstPad *peer;
+  GstPad *pad, *src_pad;
   GstElement *element;
-  gboolean ret;
+  guint n_src_pads;
 
-  peer = gst_pad_get_peer (GST_VIDEO_DECODER_SRC_PAD (base));
-  if (!peer)
-    return FALSE;
+  /* Walk downstream, stepping through queue elements, to detect a tee
+   * that is not directly connected, e.g.: vah264dec ! queue ! tee */
+  pad = gst_pad_get_peer (GST_VIDEO_DECODER_SRC_PAD (base));
 
-  element = gst_pad_get_parent_element (peer);
-  gst_object_unref (peer);
+  while (pad) {
+    element = gst_pad_get_parent_element (pad);
+    gst_object_unref (pad);
+    pad = NULL;
 
-  if (!element)
-    return FALSE;
+    if (!element)
+      break;
 
-  GST_OBJECT_LOCK (element);
-  ret = GST_ELEMENT_CAST (element)->numsinkpads == 1
-      && GST_ELEMENT_CAST (element)->numsrcpads > 1;
-  GST_OBJECT_UNLOCK (element);
+    GST_OBJECT_LOCK (element);
+    n_src_pads = GST_ELEMENT_CAST (element)->numsrcpads;
+    GST_OBJECT_UNLOCK (element);
 
-  gst_object_unref (element);
-  return ret;
+    if (n_src_pads > 1) {
+      gst_object_unref (element);
+      return TRUE;
+    }
+
+    if (n_src_pads == 1) {
+      src_pad = gst_element_get_static_pad (element, "src");
+      if (src_pad) {
+        pad = gst_pad_get_peer (src_pad);
+        gst_object_unref (src_pad);
+      }
+    }
+
+    gst_object_unref (element);
+  }
+
+  return FALSE;
 }
 
 static gboolean
@@ -898,7 +906,7 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
     return FALSE;
 
   if (_downstream_has_fanout (base)) {
-    GST_ERROR (RED "[bkcheah] tee detected set same dpy >>>>" RESET);
+    GST_DEBUG_OBJECT (base, "fanout detected downstream, assuming same display");
     return FALSE;
   }
 
@@ -911,39 +919,23 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
       gpointer va_dpy = NULL;
       VADisplay dec_va_dpy = gst_va_display_get_va_dpy (base->display);
 
-      GST_ERROR (GREEN "[bkcheah] Decoder has Context >>>>" RESET);
-
       if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT,
               &downstream_display, NULL)) {
-        GST_ERROR (GREEN "[bkcheah] Decoder has gst-display >>>>" RESET);
-
         if (GST_IS_VA_DISPLAY (downstream_display)) {
           VADisplay downstream_va_dpy =
               gst_va_display_get_va_dpy (GST_VA_DISPLAY (downstream_display));
-
-          GST_ERROR (GREEN
-              "[bkcheah] Decoder downstream_display @has-vadpy >>>>" RESET);
-          GST_ERROR (RED
-              "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==DOWNLOAD==) VADisplay: 0x%lx"
-              RESET, (unsigned long) dec_va_dpy,
-              (unsigned long) downstream_va_dpy);
-
           different = (downstream_va_dpy != dec_va_dpy);
         }
         gst_object_unref (downstream_display);
       } else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
               NULL)) {
-        GST_ERROR (GREEN "[bkcheah] Found legacy va-display pointer" RESET);
-        GST_ERROR (RED
-            "[bkcheah] (==DEC==) VADisplay: 0x%lx | (==LEGACY==) VADisplay: 0x%lx"
-            RESET, (unsigned long) dec_va_dpy, (unsigned long) va_dpy);
         different = (va_dpy != dec_va_dpy);
       }
     }
   }
   gst_query_unref (query);
 
-  GST_ERROR_OBJECT (base, RED "downstream VA display is %s" RESET,
+  GST_DEBUG_OBJECT (base, "downstream VA display is %s",
       different ? "different" : "same or not VA");
 
   return different;
@@ -1005,9 +997,6 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
     goto bail;
   }
 
-  GST_ERROR_OBJECT (base,
-      CYAN "[bkcheah] downstream-caps %" GST_PTR_FORMAT RESET, allowed_caps);
-
   /* iterate allowed caps to find the first "capable" capability according our
    * ordered list of preferred caps features */
   num_structures = gst_caps_get_size (allowed_caps);
@@ -1020,9 +1009,6 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
       guint64 mod = 0;
 
       features = gst_caps_get_features (allowed_caps, j);
-      gchar *features_str = gst_caps_features_to_string (features);
-      GST_ERROR (CYAN "[bkcheah][LOOP] Structure %d features: %s" RESET, j,
-          features_str);
       if (!gst_caps_features_contains_id_str (features, feats[i]))
         continue;
 
@@ -1285,8 +1271,7 @@ gst_va_base_dec_set_output_state (GstVaBaseDec * base)
   if (capsfeatures)
     gst_caps_set_features_simple (base->output_state->caps, capsfeatures);
 
-  GST_ERROR_OBJECT (base,
-      CYAN "[bkcheah] Negotiated caps %" GST_PTR_FORMAT RESET,
+  GST_INFO_OBJECT (base, "Negotiated caps %" GST_PTR_FORMAT,
       base->output_state->caps);
 
   return TRUE;
