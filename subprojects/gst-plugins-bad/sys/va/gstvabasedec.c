@@ -864,43 +864,27 @@ enum
 static gboolean
 _downstream_has_fanout (GstVaBaseDec * base)
 {
-  GstPad *pad, *src_pad;
+  GstPad *peer;
   GstElement *element;
-  guint n_src_pads;
+  gboolean ret;
 
-  /* Walk downstream, stepping through queue elements, to detect a tee
-   * that is not directly connected, e.g.: vah264dec ! queue ! tee */
-  pad = gst_pad_get_peer (GST_VIDEO_DECODER_SRC_PAD (base));
+  peer = gst_pad_get_peer (GST_VIDEO_DECODER_SRC_PAD (base));
+  if (!peer)
+    return FALSE;
 
-  while (pad) {
-    element = gst_pad_get_parent_element (pad);
-    gst_object_unref (pad);
-    pad = NULL;
+  element = gst_pad_get_parent_element (peer);
+  gst_object_unref (peer);
 
-    if (!element)
-      break;
+  if (!element)
+    return FALSE;
 
-    GST_OBJECT_LOCK (element);
-    n_src_pads = GST_ELEMENT_CAST (element)->numsrcpads;
-    GST_OBJECT_UNLOCK (element);
+  GST_OBJECT_LOCK (element);
+  ret = GST_ELEMENT_CAST (element)->numsinkpads == 1
+      && GST_ELEMENT_CAST (element)->numsrcpads > 1;
+  GST_OBJECT_UNLOCK (element);
 
-    if (n_src_pads > 1) {
-      gst_object_unref (element);
-      return TRUE;
-    }
-
-    if (n_src_pads == 1) {
-      src_pad = gst_element_get_static_pad (element, "src");
-      if (src_pad) {
-        pad = gst_pad_get_peer (src_pad);
-        gst_object_unref (src_pad);
-      }
-    }
-
-    gst_object_unref (element);
-  }
-
-  return FALSE;
+  gst_object_unref (element);
+  return ret;
 }
 
 static gboolean
