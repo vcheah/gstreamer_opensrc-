@@ -912,9 +912,8 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
   if (!base->display)
     return FALSE;
 
-  if (_downstream_has_fanout (base)) {
+  if (_downstream_has_fanout (base))
     return FALSE;
-  }
 
   query = gst_query_new_context (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
   if (gst_pad_peer_query (GST_VIDEO_DECODER_SRC_PAD (base), query)) {
@@ -922,7 +921,6 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
     if (ctxt) {
       const GstStructure *s = gst_context_get_structure (ctxt);
       GstObject *downstream_display = NULL;
-      gpointer va_dpy = NULL;
       VADisplay dec_va_dpy = gst_va_display_get_va_dpy (base->display);
 
       if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT,
@@ -933,9 +931,10 @@ _downstream_has_different_va_display (GstVaBaseDec * base)
           different = (downstream_va_dpy != dec_va_dpy);
         }
         gst_object_unref (downstream_display);
-      } else if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy,
-              NULL)) {
-        different = (va_dpy != dec_va_dpy);
+      } else {
+        gpointer va_dpy = NULL;
+        if (gst_structure_get (s, "va-display", G_TYPE_POINTER, &va_dpy, NULL))
+          different = (va_dpy != dec_va_dpy);
       }
     }
   }
