@@ -57,6 +57,7 @@ struct _GstVaDisplayDrm
   /* <private> */
   gchar *path;
   gint fd;
+  gboolean is_xe;
 };
 
 /**
@@ -156,6 +157,8 @@ gst_va_display_drm_create_va_display (GstVaDisplay * display)
     }
     GST_INFO_OBJECT (self, "DRM render node with kernel driver %s",
         version->name);
+
+    self->is_xe = g_str_equal (version->name, "xe");
     drmFreeVersion (version);
   }
 #endif
@@ -188,6 +191,14 @@ static void
 gst_va_display_drm_init (GstVaDisplayDrm * self)
 {
   self->fd = -1;
+}
+
+gboolean
+gst_va_display_drm_is_xe (GstVaDisplay * display)
+{
+  g_return_val_if_fail (GST_IS_VA_DISPLAY_DRM (display), FALSE);
+
+  return GST_VA_DISPLAY_DRM (display)->is_xe;
 }
 
 /**
