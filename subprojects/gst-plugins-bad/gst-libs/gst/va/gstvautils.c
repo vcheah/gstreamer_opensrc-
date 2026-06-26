@@ -315,14 +315,19 @@ gst_va_handle_set_context (GstElement * element, GstContext * context,
   }
 
   if (display_replacement) {
+
+    const gint vadpy_threshold = gst_va_get_threshold_limit_value ();
+
     if (GST_IS_VA_DISPLAY_DRM (display_replacement)
-        && gst_va_display_drm_is_xe (display_replacement)) {
-      if (gst_va_display_is_implementation (display_replacement,
-              GST_VA_IMPLEMENTATION_INTEL_IHD) && !from_neighbor) {
+        && gst_va_display_drm_is_xe (display_replacement)
+        && gst_va_display_is_implementation (display_replacement,
+            GST_VA_IMPLEMENTATION_INTEL_IHD) && vadpy_threshold) {
+
+      if (!from_neighbor) {
         guint ref;
 
         ref = GST_OBJECT_REFCOUNT_VALUE (display_replacement);
-        if (ref > 4) {
+        if (ref > vadpy_threshold) {
           gst_object_unref (display_replacement);
           return FALSE;
         }
