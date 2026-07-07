@@ -249,7 +249,7 @@ option('sctp-internal-usrsctp', type: 'feature', value : 'enabled',
        description: 'Whether to use the bundled usrsctp library or the system one')
 
 # MSDK plugin options
-option('mfx_api', type : 'combo', choices : ['MSDK', 'oneVPL', 'auto'], value : 'auto',
+option('mfx_api', type : 'combo', choices : ['MSDK', 'oneVPL', 'auto'], value : 'oneVPL',
        description : 'Select MFX API to build against')
 
 # nvcodec plugin options
@@ -307,7 +307,7 @@ option('package-name', type : 'string', yield : true,
        description : 'package name to use in plugins')
 option('package-origin', type : 'string', value : 'Unknown package origin', yield : true,
        description : 'package origin URL to use in plugins')
-option('doc', type : 'feature', value : 'auto', yield: true,
+option('doc', type : 'feature', value : 'disabled', yield: true,
        description: 'Enable documentation.')
 option('glib_debug', type : 'feature', value : 'auto', yield : true, description : 'Enable GLib debug infrastructure (see docs/macros.txt)')
 option('glib_assert', type : 'boolean', value : true, yield : true, description : 'Enable GLib assertion (see docs/macros.txt)',
