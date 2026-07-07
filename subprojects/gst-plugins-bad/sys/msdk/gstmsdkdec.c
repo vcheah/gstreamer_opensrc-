@@ -1917,25 +1917,33 @@ gst_msdkdec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
     pool = gst_video_buffer_pool_new ();
 
   size = MAX (size, vinfo.size);
-  pool_config = gst_buffer_pool_get_config (pool);
-  gst_buffer_pool_config_set_params (pool_config,
-      pool_caps, size, min_buffers, max_buffers);
-  gst_buffer_pool_config_set_allocator (pool_config, allocator, &params);
 
-  if (!gst_buffer_pool_set_config (pool, pool_config)) {
+  /* GstVideoBufferPool cannot accept DMA_DRM caps — its set_config calls
+   * gst_video_info_from_caps() which does not handle format=DMA_DRM.
+   * Skip the config for our own placeholder pool; it will be replaced by
+   * the MSDK pool below. For a downstream-provided pool (update_pool),
+   * attempt config as usual so a failure is still a hard error. */
+  if (update_pool || !gst_video_is_dma_drm_caps (pool_caps)) {
     pool_config = gst_buffer_pool_get_config (pool);
+    gst_buffer_pool_config_set_params (pool_config,
+        pool_caps, size, min_buffers, max_buffers);
+    gst_buffer_pool_config_set_allocator (pool_config, allocator, &params);
 
-    if (!gst_buffer_pool_config_validate_params (pool_config,
-            pool_caps, size, min_buffers, max_buffers)) {
-      gst_object_unref (pool);
-      pool = gst_video_buffer_pool_new ();
-      gst_buffer_pool_config_set_params (pool_config,
-          pool_caps, size, min_buffers, max_buffers);
-      gst_buffer_pool_config_set_allocator (pool_config, allocator, &params);
+    if (!gst_buffer_pool_set_config (pool, pool_config)) {
+      pool_config = gst_buffer_pool_get_config (pool);
+
+      if (!gst_buffer_pool_config_validate_params (pool_config,
+              pool_caps, size, min_buffers, max_buffers)) {
+        gst_object_unref (pool);
+        pool = gst_video_buffer_pool_new ();
+        gst_buffer_pool_config_set_params (pool_config,
+            pool_caps, size, min_buffers, max_buffers);
+        gst_buffer_pool_config_set_allocator (pool_config, allocator, &params);
+      }
+
+      if (!gst_buffer_pool_set_config (pool, pool_config))
+        return FALSE;
     }
-
-    if (!gst_buffer_pool_set_config (pool, pool_config))
-      return FALSE;
   }
 
   if (update_allocator)
