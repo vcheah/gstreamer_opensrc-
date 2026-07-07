@@ -165,8 +165,33 @@ fixate_output_format (GstMsdkVPP * thiz, GstVideoInfo * vinfo, GstCaps * caps)
       break;
   }
 
-  if (!fixate)
+  if (!fixate) {
     fmt = GST_VIDEO_FORMAT_NV12;
+#ifndef _WIN32
+    /* The loop variables (is_dma, modifier) reflect the last-processed
+     * structure, which may not be the DMABuf structure at fixated_idx.
+     * Re-derive them directly from caps[fixated_idx] so the DMABuf path
+     * is taken when the first structure is DMABuf (e.g. input is Y210 but
+     * downstream only accepts NV12 DMABuf). */
+    {
+      GstCapsFeatures *f = gst_caps_get_features (caps, fixated_idx);
+      is_dma = gst_caps_features_contains (f, GST_CAPS_FEATURE_MEMORY_DMABUF);
+      is_va = !is_dma &&
+          gst_caps_features_contains (f, GST_CAPS_FEATURE_MEMORY_VA);
+      if (is_dma) {
+        const GValue *v =
+            gst_structure_get_value (gst_caps_get_structure (caps, fixated_idx),
+            "drm-format");
+        modifier = DRM_FORMAT_MOD_INVALID;
+        if (v && GST_VALUE_HOLDS_LIST (v))
+          v = gst_value_list_get_value (v, 0);
+        if (v && G_VALUE_HOLDS_STRING (v))
+          gst_video_dma_drm_fourcc_from_string (g_value_get_string (v),
+              &modifier);
+      }
+    }
+#endif
+  }
 
   out = gst_structure_copy (gst_caps_get_structure (caps, fixated_idx));
   features = gst_caps_features_copy (gst_caps_get_features (caps, fixated_idx));
