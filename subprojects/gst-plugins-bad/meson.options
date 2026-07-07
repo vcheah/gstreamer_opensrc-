@@ -81,7 +81,7 @@ option('opencv', type : 'feature', value : 'auto', description : 'OpenCV compute
 # Feature options for optional deps in plugins
 option('drm', type : 'feature', value : 'auto', description: 'libdrm support in the GstVA library')
 option('udev', type : 'feature', value : 'auto', description: 'gudev support in the new VA-API plugin')
-option('wayland', type : 'feature', value : 'auto', description : 'Wayland plugin/library, support in the Vulkan plugin')
+option('wayland', type : 'feature', value : 'enabled', description : 'Wayland plugin/library, support in the Vulkan plugin')
 option('x11', type : 'feature', value : 'auto', description : 'X11 support in Vulkan, GL and rfb plugins')
 
 # Feature options for plugins that need external deps
