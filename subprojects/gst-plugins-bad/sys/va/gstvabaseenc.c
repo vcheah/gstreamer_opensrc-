@@ -247,6 +247,7 @@ static GstFlowReturn
 gst_va_base_enc_import_input_buffer (GstVaBaseEnc * base,
     GstBuffer * inbuf, GstBuffer ** buf)
 {
+  GstBuffer *prepared_buf;
   GstVaBufferImporter importer = {
     .element = GST_ELEMENT_CAST (base),
 #ifndef GST_DISABLE_GST_DEBUG
@@ -258,10 +259,20 @@ gst_va_base_enc_import_input_buffer (GstVaBaseEnc * base,
     .sinkpad_info = &base->priv->sinkpad_info,
     .get_sinkpad_pool = _get_sinkpad_pool,
   };
+  GstFlowReturn ret;
 
   g_return_val_if_fail (GST_IS_VA_BASE_ENC (base), GST_FLOW_ERROR);
 
-  return gst_va_buffer_importer_import (&importer, inbuf, buf);
+  prepared_buf = gst_va_buffer_prepare_for_import (inbuf, base->display);
+  if (!prepared_buf)
+    return GST_FLOW_ERROR;
+
+  ret = gst_va_buffer_importer_import (&importer, prepared_buf, buf);
+
+  if (prepared_buf != inbuf)
+    gst_clear_buffer (&prepared_buf);
+
+  return ret;
 }
 
 guint
