@@ -112,6 +112,7 @@ _try_import_buffer (GstVaBufferImporter * importer, GstBuffer * inbuf)
 
   g_rec_mutex_lock (&GST_VA_SHARED_LOCK);
   ret = _try_import_dmabuf_unlocked (importer, inbuf);
+
   g_rec_mutex_unlock (&GST_VA_SHARED_LOCK);
 
   return ret;
