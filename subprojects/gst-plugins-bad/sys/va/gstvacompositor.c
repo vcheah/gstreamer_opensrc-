@@ -889,9 +889,11 @@ _get_sinkpad_pool (GstElement * element, gpointer data)
 
 static GstFlowReturn
 gst_va_compositor_import_buffer (GstVaCompositor * self,
-    GstVaCompositorPad * pad, GstBuffer * inbuf, GstBuffer ** buf)
+    GstVaCompositorPad * pad, GstBuffer * inbuf, GstBuffer ** buf,
+    GstBuffer ** prepared_buf_out)
 {
   /* Already hold GST_OBJECT_LOCK */
+  GstBuffer *prepared_buf;
   GstVaBufferImporter importer = {
     .element = GST_ELEMENT_CAST (self),
 #ifndef GST_DISABLE_GST_DEBUG
@@ -904,8 +906,25 @@ gst_va_compositor_import_buffer (GstVaCompositor * self,
     .in_drm_info = &pad->in_drm_info,
     .sinkpad_info = &pad->sinkpad_info,
   };
+  GstFlowReturn ret;
 
-  return gst_va_buffer_importer_import (&importer, inbuf, buf);
+  prepared_buf = gst_va_buffer_prepare_for_import (inbuf, self->display);
+  if (!prepared_buf)
+    return GST_FLOW_ERROR;
+
+  ret = gst_va_buffer_importer_import (&importer, prepared_buf, buf);
+  if (ret != GST_FLOW_OK) {
+    if (prepared_buf != inbuf)
+      gst_clear_buffer (&prepared_buf);
+    return ret;
+  }
+
+  if (prepared_buf_out)
+    *prepared_buf_out = (prepared_buf != inbuf) ? prepared_buf : NULL;
+  else if (prepared_buf != inbuf)
+    gst_clear_buffer (&prepared_buf);
+
+  return ret;
 }
 
 typedef struct _GstVaCompositorSampleGenerator GstVaCompositorSampleGenerator;
@@ -924,6 +943,7 @@ gst_va_compositor_sample_next (gpointer data)
   GstVaCompositorPad *pad;
   GstBuffer *inbuf;
   GstBuffer *buf;
+  GstBuffer *prepared_buf = NULL;
   GstFlowReturn res;
   GstVideoCropMeta *crop = NULL;
 
@@ -950,7 +970,8 @@ gst_va_compositor_sample_next (gpointer data)
     inbuf = gst_video_aggregator_pad_get_current_buffer (vaggpad);
     pad = GST_VA_COMPOSITOR_PAD (vaggpad);
 
-    res = gst_va_compositor_import_buffer (generator->comp, pad, inbuf, &buf);
+    res = gst_va_compositor_import_buffer (generator->comp, pad,
+        inbuf, &buf, &prepared_buf);
     if (res != GST_FLOW_OK)
       return &generator->sample;
 
@@ -960,6 +981,7 @@ gst_va_compositor_sample_next (gpointer data)
     /* *INDENT-OFF* */
     generator->sample = (GstVaComposeSample) {
       .buffer = buf,
+      .wrapped_buffer = prepared_buf,
       .input_region = (VARectangle) {
         .x = crop ? crop->x : 0,
         .y = crop ? crop->y : 0,
