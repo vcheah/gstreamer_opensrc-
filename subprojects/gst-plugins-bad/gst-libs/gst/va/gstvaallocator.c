@@ -1197,9 +1197,10 @@ gst_va_dmabuf_memories_setup (GstVaDisplay * display,
 /**
  * gst_va_buffer_new_wrapped_dmabuf:
  * @display: a #GstVaDisplay
- * @buffer: a #GstBuffer containing DMA-BUF memory
+ * @inbuf: a #GstBuffer containing DMA-BUF memory
+ * @outbuf: (out) (transfer full): location to store the new #GstBuffer
  *
- * Creates a new buffer that wraps the DMA-BUF memory from @buffer but
+ * Creates a new buffer that wraps the DMA-BUF memory from @inbuf but
  * associates it with @display's allocator. This is useful for cross-display
  * scenarios where the input buffer was allocated by a different VA display.
  *
@@ -1211,45 +1212,48 @@ gst_va_dmabuf_memories_setup (GstVaDisplay * display,
  * Common use cases:
  * - Multi dpy VA video processing pipelines
  *
- * Returns: (transfer full) (nullable): a new #GstBuffer wrapping the DMA-BUF
- *   memory, or %NULL on error or if @buffer does not contain DMA-BUF memory.
+ * Returns: %GST_FLOW_OK on success, or %GST_FLOW_ERROR on failure.
  *
  * Since: 1.30
  */
-static GstBuffer *
-gst_va_buffer_new_wrapped_dmabuf (GstVaDisplay * display, GstBuffer * buffer)
+static GstFlowReturn
+gst_va_buffer_new_wrapped_dmabuf (GstVaDisplay * display, GstBuffer * inbuf,
+    GstBuffer ** outbuf)
 {
   g_autoptr (GstAllocator) allocator;
   GstMemory *mem_input, *mem_dma;
   GstBuffer *wrapped_buf;
   GstVideoMeta *meta;
 
-  g_return_val_if_fail (GST_IS_VA_DISPLAY (display), NULL);
+  g_return_val_if_fail (GST_IS_VA_DISPLAY (display), GST_FLOW_ERROR);
 
-  mem_input = gst_buffer_peek_memory (buffer, 0);
+  *outbuf = NULL;
+
+  mem_input = gst_buffer_peek_memory (inbuf, 0);
   if (!gst_is_dmabuf_memory (mem_input))
-    return NULL;
+    return GST_FLOW_ERROR;
 
   allocator = gst_va_dmabuf_allocator_new (display);
   mem_dma = gst_dmabuf_allocator_alloc_with_flags (allocator,
       gst_dmabuf_memory_get_fd (mem_input),
-      gst_buffer_get_size (buffer), GST_FD_MEMORY_FLAG_DONT_CLOSE);
+      gst_buffer_get_size (inbuf), GST_FD_MEMORY_FLAG_DONT_CLOSE);
 
   if (!mem_dma)
-    return NULL;
+    return GST_FLOW_ERROR;
 
   wrapped_buf = gst_buffer_new ();
   gst_buffer_append_memory (wrapped_buf, mem_dma);
 
-  meta = gst_buffer_get_video_meta (buffer);
+  meta = gst_buffer_get_video_meta (inbuf);
   if (meta) {
     gst_buffer_add_video_meta_full (wrapped_buf,
-        GST_VIDEO_FRAME_FLAG_NONE,
+        meta->flags,
         meta->format, meta->width, meta->height,
         meta->n_planes, meta->offset, meta->stride);
   }
 
-  return wrapped_buf;
+  *outbuf = wrapped_buf;
+  return GST_FLOW_OK;
 }
 
 /**
@@ -1279,7 +1283,11 @@ gst_va_buffer_prepare_for_import (GstBuffer * buffer, GstVaDisplay * display)
   if (gst_is_dmabuf_memory (mem) &&
       GST_IS_VA_DMABUF_ALLOCATOR (mem->allocator) &&
       gst_va_allocator_peek_display (mem->allocator) != display) {
-    return gst_va_buffer_new_wrapped_dmabuf (display, buffer);
+    GstBuffer *wrapped = NULL;
+    if (gst_va_buffer_new_wrapped_dmabuf (display, buffer, &wrapped)
+        != GST_FLOW_OK)
+      return NULL;
+    return wrapped;
   }
 
   return buffer;
