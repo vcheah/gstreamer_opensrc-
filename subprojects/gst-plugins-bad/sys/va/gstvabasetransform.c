@@ -874,9 +874,10 @@ gst_va_base_transform_import_buffer (GstVaBaseTransform * self,
     gst_clear_object (&self->priv->sinkpad_pool);
   }
 
-  prepared_buf = gst_va_buffer_prepare_for_import (inbuf, self->display);
-  if (!prepared_buf)
+  if (gst_va_buffer_prepare_for_import (self->display, inbuf, &prepared_buf) != GST_FLOW_OK) {
+    GST_ERROR_OBJECT (self, "Failed to prepare input buffer for import");
     return GST_FLOW_ERROR;
+  }
 
   ret = gst_va_buffer_importer_import (&importer, prepared_buf, buf);
   if (ret != GST_FLOW_OK)

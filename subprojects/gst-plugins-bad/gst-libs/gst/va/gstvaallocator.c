@@ -1225,8 +1225,6 @@ gst_va_buffer_new_wrapped_dmabuf (GstVaDisplay * display, GstBuffer * inbuf,
   GstBuffer *wrapped_buf;
   GstVideoMeta *meta;
 
-  g_return_val_if_fail (GST_IS_VA_DISPLAY (display), GST_FLOW_ERROR);
-
   *outbuf = NULL;
 
   mem_input = gst_buffer_peek_memory (inbuf, 0);
@@ -1258,39 +1256,38 @@ gst_va_buffer_new_wrapped_dmabuf (GstVaDisplay * display, GstBuffer * inbuf,
 
 /**
  * gst_va_buffer_prepare_for_import:
- * @buffer: a #GstBuffer
  * @display: target #GstVaDisplay
+ * @buffer: a #GstBuffer
+ * @imported_buffer: (out) (transfer full): location to store the prepared buffer
  *
  * Prepares a buffer for import to the target display. In multi-VA-display
  * scenarios, if @buffer originates from a different VA display, this may
  * create a wrapped DMABuf-backed buffer compatible with @display.
  *
- * Returns: (transfer full) (nullable): prepared buffer, or %NULL on error.
- *   Caller must check if returned buffer differs from input to manage cleanup.
+ * Returns: %GST_FLOW_OK on success, or %GST_FLOW_ERROR on failure.
+ *   Caller must check if @imported_buffer differs from @buffer to manage cleanup.
  *
  * Since: 1.30
  */
-GstBuffer *
-gst_va_buffer_prepare_for_import (GstBuffer * buffer, GstVaDisplay * display)
+GstFlowReturn
+gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
+    GstBuffer ** imported_buffer)
 {
   GstMemory *mem;
 
-  g_return_val_if_fail (GST_IS_BUFFER (buffer), NULL);
-  g_return_val_if_fail (display != NULL, NULL);
+  g_return_val_if_fail (GST_IS_BUFFER (buffer), GST_FLOW_ERROR);
+  g_return_val_if_fail (imported_buffer != NULL, GST_FLOW_ERROR);
 
   mem = gst_buffer_peek_memory (buffer, 0);
 
   if (gst_is_dmabuf_memory (mem) &&
       GST_IS_VA_DMABUF_ALLOCATOR (mem->allocator) &&
       gst_va_allocator_peek_display (mem->allocator) != display) {
-    GstBuffer *wrapped = NULL;
-    if (gst_va_buffer_new_wrapped_dmabuf (display, buffer, &wrapped)
-        != GST_FLOW_OK)
-      return NULL;
-    return wrapped;
+    return gst_va_buffer_new_wrapped_dmabuf (display, buffer, imported_buffer);
   }
 
-  return buffer;
+  *imported_buffer = buffer;
+  return GST_FLOW_OK;
 }
 
 /*===================== GstVaAllocator / GstVaMemory =========================*/

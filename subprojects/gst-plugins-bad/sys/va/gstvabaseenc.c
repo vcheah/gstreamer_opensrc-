@@ -263,9 +263,10 @@ gst_va_base_enc_import_input_buffer (GstVaBaseEnc * base,
 
   g_return_val_if_fail (GST_IS_VA_BASE_ENC (base), GST_FLOW_ERROR);
 
-  prepared_buf = gst_va_buffer_prepare_for_import (inbuf, base->display);
-  if (!prepared_buf)
+  if (gst_va_buffer_prepare_for_import (base->display, inbuf, &prepared_buf) != GST_FLOW_OK) {
+    GST_ERROR_OBJECT (base, "Failed to prepare input buffer for import");
     return GST_FLOW_ERROR;
+  }
 
   ret = gst_va_buffer_importer_import (&importer, prepared_buf, buf);
 
