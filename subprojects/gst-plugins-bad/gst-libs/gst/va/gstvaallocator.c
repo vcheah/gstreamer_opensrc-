@@ -1221,26 +1221,39 @@ gst_va_buffer_new_wrapped_dmabuf (GstVaDisplay * display, GstBuffer * inbuf,
     GstBuffer ** outbuf)
 {
   g_autoptr (GstAllocator) allocator;
-  GstMemory *mem_input, *mem_dma;
   GstBuffer *wrapped_buf;
   GstVideoMeta *meta;
+  guint i, n_mems;
 
   *outbuf = NULL;
 
-  mem_input = gst_buffer_peek_memory (inbuf, 0);
-  if (!gst_is_dmabuf_memory (mem_input))
+  n_mems = gst_buffer_n_memory (inbuf);
+  if (n_mems == 0)
     return GST_FLOW_ERROR;
 
   allocator = gst_va_dmabuf_allocator_new (display);
-  mem_dma = gst_dmabuf_allocator_alloc_with_flags (allocator,
-      gst_dmabuf_memory_get_fd (mem_input),
-      gst_buffer_get_size (inbuf), GST_FD_MEMORY_FLAG_DONT_CLOSE);
-
-  if (!mem_dma)
-    return GST_FLOW_ERROR;
-
   wrapped_buf = gst_buffer_new ();
-  gst_buffer_append_memory (wrapped_buf, mem_dma);
+
+  for (i = 0; i < n_mems; i++) {
+    GstMemory *mem_input, *mem_dma;
+
+    mem_input = gst_buffer_peek_memory (inbuf, i);
+    if (!gst_is_dmabuf_memory (mem_input)) {
+      gst_buffer_unref (wrapped_buf);
+      return GST_FLOW_ERROR;
+    }
+
+    mem_dma = gst_dmabuf_allocator_alloc_with_flags (allocator,
+        gst_dmabuf_memory_get_fd (mem_input),
+        mem_input->size, GST_FD_MEMORY_FLAG_DONT_CLOSE);
+
+    if (!mem_dma) {
+      gst_buffer_unref (wrapped_buf);
+      return GST_FLOW_ERROR;
+    }
+
+    gst_buffer_append_memory (wrapped_buf, mem_dma);
+  }
 
   meta = gst_buffer_get_video_meta (inbuf);
   if (meta) {
