@@ -1873,11 +1873,8 @@ gst_va_filter_compose (GstVaFilter * self, GstVaComposeTransaction * tx)
     if (in_surface == VA_INVALID_ID)
       return FALSE;
 
-    /* (transfer full), unref it */
-    gst_buffer_unref (sample->buffer);
-
-    if (sample->wrapped_buffer)
-      g_queue_push_tail (wrapped_buffers, sample->wrapped_buffer);
+    /* hold alive until vaEndPicture completes to keep DMA-BUF fds open */
+    g_queue_push_tail (wrapped_buffers, sample->buffer);
 
     GST_OBJECT_LOCK (self);
     /* *INDENT-OFF* */
@@ -1937,6 +1934,7 @@ fail_end_pic:
     if (status != VA_STATUS_SUCCESS)
       GST_ERROR_OBJECT (self, "vaEndPicture: %s", vaErrorStr (status));
 
+    g_queue_free_full (wrapped_buffers, (GDestroyNotify) gst_buffer_unref);
     return FALSE;
   }
 }
