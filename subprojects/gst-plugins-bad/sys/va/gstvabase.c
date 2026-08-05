@@ -108,10 +108,17 @@ _try_import_buffer (GstVaBufferImporter * importer, GstBuffer * inbuf)
   surface = gst_va_buffer_get_surface (inbuf);
   if (surface != VA_INVALID_ID &&
       (gst_va_buffer_peek_display (inbuf) == importer->display))
+  {
+    GST_ERROR("[bkcheah] dmabuf/vamemory: same-vadpy ------>");
     return TRUE;
+  }
 
   g_rec_mutex_lock (&GST_VA_SHARED_LOCK);
   ret = _try_import_dmabuf_unlocked (importer, inbuf);
+
+  if (ret)
+    GST_ERROR("[bkcheah] dmabuf: diff-vadpy ------>");
+
   g_rec_mutex_unlock (&GST_VA_SHARED_LOCK);
 
   return ret;
