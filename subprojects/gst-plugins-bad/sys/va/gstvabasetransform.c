@@ -850,7 +850,6 @@ GstFlowReturn
 gst_va_base_transform_import_buffer (GstVaBaseTransform * self,
     GstBuffer * inbuf, GstBuffer ** buf)
 {
-  GstBuffer *prepared_buf;
   GstVaBufferImporter importer = {
     .element = GST_ELEMENT_CAST (self),
 #ifndef GST_DISABLE_GST_DEBUG
@@ -874,17 +873,12 @@ gst_va_base_transform_import_buffer (GstVaBaseTransform * self,
     gst_clear_object (&self->priv->sinkpad_pool);
   }
 
-  if (gst_va_buffer_prepare_for_import (self->display, inbuf, &prepared_buf) != GST_FLOW_OK) {
-    GST_ERROR_OBJECT (self, "Failed to prepare input buffer for import");
-    return GST_FLOW_ERROR;
-  }
-
-  ret = gst_va_buffer_importer_import (&importer, prepared_buf, buf);
+  ret = gst_va_buffer_importer_import (&importer, inbuf, buf);
   if (ret != GST_FLOW_OK)
     goto bail;
 
   if (*buf == inbuf)
-    goto bail;
+    return ret;
 
   data.self = self;
   data.outbuf = *buf;
@@ -892,8 +886,6 @@ gst_va_base_transform_import_buffer (GstVaBaseTransform * self,
   gst_buffer_foreach_meta (inbuf, foreach_metadata, &data);
 
 bail:
-  if (prepared_buf != inbuf)
-    gst_clear_buffer (&prepared_buf);
   return ret;
 }
 

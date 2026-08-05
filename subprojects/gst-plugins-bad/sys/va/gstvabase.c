@@ -108,16 +108,10 @@ _try_import_buffer (GstVaBufferImporter * importer, GstBuffer * inbuf)
   surface = gst_va_buffer_get_surface (inbuf);
   if (surface != VA_INVALID_ID &&
       (gst_va_buffer_peek_display (inbuf) == importer->display))
-  {
-    GST_ERROR("[bkcheah] dmabuf/vamemory: same-vadpy ------>");
     return TRUE;
-  }
 
   g_rec_mutex_lock (&GST_VA_SHARED_LOCK);
   ret = _try_import_dmabuf_unlocked (importer, inbuf);
-
-  if (ret)
-    GST_ERROR("[bkcheah] dmabuf: DIFF-vadpy ------>");
   g_rec_mutex_unlock (&GST_VA_SHARED_LOCK);
 
   return ret;
@@ -127,17 +121,30 @@ GstFlowReturn
 gst_va_buffer_importer_import (GstVaBufferImporter * importer,
     GstBuffer * inbuf, GstBuffer ** outbuf)
 {
+  GstBuffer *prepared_buf;
   GstBuffer *buffer = NULL;
   GstBufferPool *pool;
   GstFlowReturn ret;
   GstVideoFrame in_frame, out_frame;
   gboolean imported, copied;
 
-  imported = _try_import_buffer (importer, inbuf);
+  if (gst_va_buffer_prepare_for_import (importer->display, inbuf,
+          &prepared_buf) != GST_FLOW_OK) {
+    GST_ERROR_OBJECT (importer->element,
+        "Failed to prepare input buffer for import");
+    return GST_FLOW_ERROR;
+  }
+
+  imported = _try_import_buffer (importer, prepared_buf);
   if (imported) {
-    *outbuf = gst_buffer_ref (inbuf);
+    *outbuf = gst_buffer_ref (prepared_buf);
+    if (prepared_buf != inbuf)
+      gst_clear_buffer (&prepared_buf);
     return GST_FLOW_OK;
   }
+
+  if (prepared_buf != inbuf)
+    gst_clear_buffer (&prepared_buf);
 
   /* input buffer doesn't come from a vapool, thus it is required to
    * have a pool, grab from it a new buffer and copy the input
