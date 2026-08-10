@@ -1263,6 +1263,8 @@ gst_va_buffer_new_wrapped_dmabuf (GstVaDisplay * display, GstBuffer * inbuf,
         meta->n_planes, meta->offset, meta->stride);
   }
 
+  gst_buffer_add_parent_buffer_meta (wrapped_buf, inbuf);
+
   *outbuf = wrapped_buf;
   return GST_FLOW_OK;
 }
