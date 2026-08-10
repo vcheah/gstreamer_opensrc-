@@ -1301,7 +1301,7 @@ gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
     return gst_va_buffer_new_wrapped_dmabuf (display, buffer, imported_buffer);
   }
 
-  *imported_buffer = buffer;
+  *imported_buffer = gst_buffer_ref (buffer);
   return GST_FLOW_OK;
 }
 
