@@ -892,7 +892,6 @@ gst_va_compositor_import_buffer (GstVaCompositor * self,
     GstVaCompositorPad * pad, GstBuffer * inbuf, GstBuffer ** buf)
 {
   /* Already hold GST_OBJECT_LOCK */
-  GstBuffer *prepared_buf;
   GstVaBufferImporter importer = {
     .element = GST_ELEMENT_CAST (self),
 #ifndef GST_DISABLE_GST_DEBUG
@@ -905,19 +904,8 @@ gst_va_compositor_import_buffer (GstVaCompositor * self,
     .in_drm_info = &pad->in_drm_info,
     .sinkpad_info = &pad->sinkpad_info,
   };
-  GstFlowReturn ret;
 
-  if (gst_va_buffer_prepare_for_import (self->display, inbuf, &prepared_buf) != GST_FLOW_OK) {
-    GST_ERROR_OBJECT (self, "Failed to prepare input buffer for import");
-    return GST_FLOW_ERROR;
-  }
-
-  ret = gst_va_buffer_importer_import (&importer, prepared_buf, buf);
-
-  if (prepared_buf != inbuf)
-    gst_clear_buffer (&prepared_buf);
-
-  return ret;
+  return gst_va_buffer_importer_import (&importer, inbuf, buf);
 }
 
 typedef struct _GstVaCompositorSampleGenerator GstVaCompositorSampleGenerator;
