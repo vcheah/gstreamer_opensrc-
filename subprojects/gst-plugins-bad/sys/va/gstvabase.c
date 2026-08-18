@@ -122,17 +122,28 @@ GstFlowReturn
 gst_va_buffer_importer_import (GstVaBufferImporter * importer,
     GstBuffer * inbuf, GstBuffer ** outbuf)
 {
+  GstBuffer *prepared_buf = NULL;
   GstBuffer *buffer = NULL;
   GstBufferPool *pool;
   GstFlowReturn ret;
   GstVideoFrame in_frame, out_frame;
   gboolean imported, copied;
 
-  imported = _try_import_buffer (importer, inbuf);
+  if (gst_va_buffer_prepare_for_import (importer->display, inbuf,
+          &prepared_buf) != GST_FLOW_OK) {
+    GST_ERROR_OBJECT (importer->element,
+        "Failed to prepare input buffer for import");
+    return GST_FLOW_ERROR;
+  }
+
+  imported = _try_import_buffer (importer, prepared_buf);
   if (imported) {
-    *outbuf = gst_buffer_ref (inbuf);
+    *outbuf = gst_buffer_ref (prepared_buf);
+    gst_clear_buffer (&prepared_buf);
     return GST_FLOW_OK;
   }
+
+  gst_clear_buffer (&prepared_buf);
 
   /* input buffer doesn't come from a vapool, thus it is required to
    * have a pool, grab from it a new buffer and copy the input
