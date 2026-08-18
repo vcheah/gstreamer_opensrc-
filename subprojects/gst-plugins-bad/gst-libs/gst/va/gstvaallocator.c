@@ -94,6 +94,20 @@ gst_va_buffer_aux_surface_quark (void)
   return surface_quark;
 }
 
+/* Quark to cache a cross-display wrapped GstBuffer on its source buffer */
+static GQuark
+gst_va_wrapped_dmabuf_quark (void)
+{
+  static gsize wrapped_quark = 0;
+
+  if (g_once_init_enter (&wrapped_quark)) {
+    GQuark quark = g_quark_from_string ("GstVaWrappedDmabuf");
+    g_once_init_leave (&wrapped_quark, quark);
+  }
+
+  return wrapped_quark;
+}
+
 /*========================= GstVaBufferSurface ===============================*/
 
 typedef struct _GstVaBufferSurface GstVaBufferSurface;
@@ -1192,6 +1206,131 @@ gst_va_dmabuf_memories_setup (GstVaDisplay * display,
   }
 
   return TRUE;
+}
+
+/**
+ * gst_va_buffer_new_wrapped_dmabuf:
+ * @display: a #GstVaDisplay
+ * @inbuf: a #GstBuffer containing DMA-BUF memory
+ * @outbuf: (out) (transfer full): location to store the new #GstBuffer
+ *
+ * Creates a new buffer that wraps the DMA-BUF memory from @inbuf but
+ * associates it with @display's allocator. This is useful for cross-display
+ * scenarios where the input buffer was allocated by a different VA display.
+ *
+ * The returned buffer references the same underlying DMA-BUF file descriptor
+ * (using %GST_FD_MEMORY_FLAG_DONT_CLOSE) without duplicating memory, enabling
+ * zero-copy operation across different VA displays. Video metadata from the
+ * input buffer is copied to the wrapped buffer.
+ *
+ * Common use cases:
+ * - Multi dpy VA video processing pipelines
+ *
+ * Returns: %GST_FLOW_OK on success, or %GST_FLOW_ERROR on failure.
+ *
+ * Since: 1.30
+ */
+static GstFlowReturn
+gst_va_buffer_new_wrapped_dmabuf (GstVaDisplay * display, GstBuffer * inbuf,
+    GstBuffer ** outbuf)
+{
+  g_autoptr (GstAllocator) allocator;
+  GstBuffer *wrapped_buf;
+  GstVideoMeta *meta;
+  guint i, n_mems;
+
+  *outbuf = NULL;
+
+  n_mems = gst_buffer_n_memory (inbuf);
+  if (n_mems == 0)
+    return GST_FLOW_ERROR;
+
+  allocator = gst_va_dmabuf_allocator_new (display);
+  wrapped_buf = gst_buffer_new ();
+
+  for (i = 0; i < n_mems; i++) {
+    GstMemory *mem_input, *mem_dma;
+
+    mem_input = gst_buffer_peek_memory (inbuf, i);
+    if (!gst_is_dmabuf_memory (mem_input)) {
+      gst_buffer_unref (wrapped_buf);
+      return GST_FLOW_ERROR;
+    }
+
+    mem_dma = gst_dmabuf_allocator_alloc_with_flags (allocator,
+        gst_dmabuf_memory_get_fd (mem_input),
+        mem_input->size, GST_FD_MEMORY_FLAG_DONT_CLOSE);
+
+    if (!mem_dma) {
+      gst_buffer_unref (wrapped_buf);
+      return GST_FLOW_ERROR;
+    }
+
+    gst_buffer_append_memory (wrapped_buf, mem_dma);
+  }
+
+  meta = gst_buffer_get_video_meta (inbuf);
+  if (meta) {
+    gst_buffer_add_video_meta_full (wrapped_buf,
+        meta->flags,
+        meta->format, meta->width, meta->height,
+        meta->n_planes, meta->offset, meta->stride);
+  }
+
+  *outbuf = wrapped_buf;
+  return GST_FLOW_OK;
+}
+
+/**
+ * gst_va_buffer_prepare_for_import:
+ * @display: target #GstVaDisplay
+ * @buffer: a #GstBuffer
+ * @imported_buffer: (out) (transfer full): location to store the prepared buffer
+ *
+ * Prepares a buffer for import to the target display. In multi-VA-display
+ * scenarios, if @buffer originates from a different VA display, this may
+ * create a wrapped DMABuf-backed buffer compatible with @display.
+ *
+ * Returns: %GST_FLOW_OK on success, or %GST_FLOW_ERROR on failure.
+ *   Caller must check if @imported_buffer differs from @buffer to manage cleanup.
+ *
+ * Since: 1.30
+ */
+GstFlowReturn
+gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
+    GstBuffer ** imported_buffer)
+{
+  GstMemory *mem;
+
+  g_return_val_if_fail (GST_IS_BUFFER (buffer), GST_FLOW_ERROR);
+  g_return_val_if_fail (imported_buffer != NULL, GST_FLOW_ERROR);
+
+  mem = gst_buffer_peek_memory (buffer, 0);
+
+  if (mem && gst_is_dmabuf_memory (mem) &&
+      GST_IS_VA_DMABUF_ALLOCATOR (mem->allocator) &&
+      gst_va_allocator_peek_display (mem->allocator) != display) {
+    GstBuffer *cached;
+    GstFlowReturn ret;
+
+    cached = gst_mini_object_get_qdata (GST_MINI_OBJECT (buffer),
+        gst_va_wrapped_dmabuf_quark ());
+    if (cached && gst_va_buffer_peek_display (cached) == display) {
+      *imported_buffer = gst_buffer_ref (cached);
+      return GST_FLOW_OK;
+    }
+
+    ret = gst_va_buffer_new_wrapped_dmabuf (display, buffer, imported_buffer);
+    if (ret == GST_FLOW_OK)
+      gst_mini_object_set_qdata (GST_MINI_OBJECT (buffer),
+          gst_va_wrapped_dmabuf_quark (),
+          gst_buffer_ref (*imported_buffer),
+          (GDestroyNotify) gst_buffer_unref);
+    return ret;
+  }
+
+  *imported_buffer = gst_buffer_ref (buffer);
+  return GST_FLOW_OK;
 }
 
 /*===================== GstVaAllocator / GstVaMemory =========================*/
