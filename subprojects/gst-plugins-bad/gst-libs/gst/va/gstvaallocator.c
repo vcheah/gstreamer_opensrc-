@@ -94,18 +94,14 @@ gst_va_buffer_aux_surface_quark (void)
   return surface_quark;
 }
 
-/* Quark to cache a cross-display wrapped GstBuffer on its source buffer */
+/* Per-display quark so each GstVaDisplay has its own cache slot on a source buffer */
 static GQuark
-gst_va_wrapped_dmabuf_quark (void)
+gst_va_wrapped_dmabuf_quark_for_display (GstVaDisplay * display)
 {
-  static gsize wrapped_quark = 0;
-
-  if (g_once_init_enter (&wrapped_quark)) {
-    GQuark quark = g_quark_from_string ("GstVaWrappedDmabuf");
-    g_once_init_leave (&wrapped_quark, quark);
-  }
-
-  return wrapped_quark;
+  gchar *name = g_strdup_printf ("GstVaWrappedDmabuf.%p", (gpointer) display);
+  GQuark quark = g_quark_from_string (name);
+  g_free (name);
+  return quark;
 }
 
 /*========================= GstVaBufferSurface ===============================*/
@@ -1312,9 +1308,9 @@ gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
       gst_va_allocator_peek_display (mem->allocator) != display) {
     GstBuffer *cached;
     GstFlowReturn ret;
+    GQuark quark = gst_va_wrapped_dmabuf_quark_for_display (display);
 
-    cached = gst_mini_object_get_qdata (GST_MINI_OBJECT (buffer),
-        gst_va_wrapped_dmabuf_quark ());
+    cached = gst_mini_object_get_qdata (GST_MINI_OBJECT (buffer), quark);
     if (cached && gst_va_buffer_peek_display (cached) == display) {
       *imported_buffer = gst_buffer_ref (cached);
       GST_ERROR ("cache hit: reusing wrapped dmabuf fd %d for buffer %p [X-cache-X]",
@@ -1325,11 +1321,10 @@ gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
 
     ret = gst_va_buffer_new_wrapped_dmabuf (display, buffer, imported_buffer);
     if (ret == GST_FLOW_OK) {
-          GST_ERROR ("cache miss: created wrapped dmabuf fd %d for buffer %p",
+      GST_ERROR ("cache miss: created wrapped dmabuf fd %d for buffer %p",
           gst_dmabuf_memory_get_fd (gst_buffer_peek_memory (buffer, 0)),
           (void *) buffer);
-      gst_mini_object_set_qdata (GST_MINI_OBJECT (buffer),
-          gst_va_wrapped_dmabuf_quark (),
+      gst_mini_object_set_qdata (GST_MINI_OBJECT (buffer), quark,
           gst_buffer_ref (*imported_buffer),
           (GDestroyNotify) gst_buffer_unref);
     }
