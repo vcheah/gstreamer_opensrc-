@@ -107,12 +107,16 @@ _try_import_buffer (GstVaBufferImporter * importer, GstBuffer * inbuf)
 
   surface = gst_va_buffer_get_surface (inbuf);
   if (surface != VA_INVALID_ID &&
-      (gst_va_buffer_peek_display (inbuf) == importer->display))
+      (gst_va_buffer_peek_display (inbuf) == importer->display)) {
+    GST_ERROR ("[bkcheah][%s] dmabuf/vaMemory = same-vadpy", __func__);
     return TRUE;
+  }
 
   g_rec_mutex_lock (&GST_VA_SHARED_LOCK);
   ret = _try_import_dmabuf_unlocked (importer, inbuf);
 
+  if (ret)
+    GST_ERROR ("[bkcheah][%s] dmabuf/vaMemory = diff-vadpy >>>>", __func__);
   g_rec_mutex_unlock (&GST_VA_SHARED_LOCK);
 
   return ret;
@@ -129,8 +133,10 @@ gst_va_buffer_importer_import (GstVaBufferImporter * importer,
   GstVideoFrame in_frame, out_frame;
   gboolean imported, copied;
 
-  if (gst_va_buffer_prepare_for_import (importer->display, inbuf,
-          &prepared_buf) != GST_FLOW_OK) {
+  ret =
+      gst_va_buffer_prepare_for_import (importer->display, inbuf,
+      &prepared_buf);
+  if (ret != GST_FLOW_OK) {
     GST_ERROR_OBJECT (importer->element,
         "Failed to prepare input buffer for import");
     return GST_FLOW_ERROR;
