@@ -1310,21 +1310,19 @@ gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
     GstFlowReturn ret;
     GQuark quark = gst_va_wrapped_dmabuf_quark_for_display (display);
 
-    cached = gst_mini_object_get_qdata (GST_MINI_OBJECT (buffer), quark);
+    cached = gst_mini_object_get_qdata (GST_MINI_OBJECT (mem), quark);
     if (cached && gst_va_buffer_peek_display (cached) == display) {
       *imported_buffer = gst_buffer_ref (cached);
-      GST_ERROR ("cache hit: reusing wrapped dmabuf fd %d for buffer %p [X-cache-X]",
-          gst_dmabuf_memory_get_fd (gst_buffer_peek_memory (buffer, 0)),
-          (void *) buffer);
+      GST_ERROR ("cache hit: reusing wrapped dmabuf fd %d for mem %p [X-cache-X]",
+          gst_dmabuf_memory_get_fd (mem), (void *) mem);
       return GST_FLOW_OK;
     }
 
     ret = gst_va_buffer_new_wrapped_dmabuf (display, buffer, imported_buffer);
     if (ret == GST_FLOW_OK) {
-      GST_ERROR ("cache miss: created wrapped dmabuf fd %d for buffer %p",
-          gst_dmabuf_memory_get_fd (gst_buffer_peek_memory (buffer, 0)),
-          (void *) buffer);
-      gst_mini_object_set_qdata (GST_MINI_OBJECT (buffer), quark,
+      GST_ERROR ("cache miss: created wrapped dmabuf fd %d for mem %p",
+          gst_dmabuf_memory_get_fd (mem), (void *) mem);
+      gst_mini_object_set_qdata (GST_MINI_OBJECT (mem), quark,
           gst_buffer_ref (*imported_buffer),
           (GDestroyNotify) gst_buffer_unref);
     }
