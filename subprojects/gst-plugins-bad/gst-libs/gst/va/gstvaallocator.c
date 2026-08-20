@@ -94,11 +94,11 @@ gst_va_buffer_aux_surface_quark (void)
   return surface_quark;
 }
 
-/* Per-display quark so each GstVaDisplay has its own cache slot on a source buffer */
+/* Per-display quark to cache the imported VA surface on a source buffer's memory */
 static GQuark
-gst_va_wrapped_dmabuf_quark_for_display (GstVaDisplay * display)
+gst_va_wrapped_dmabuf_surface_quark_for_display (GstVaDisplay * display)
 {
-  gchar *name = g_strdup_printf ("GstVaWrappedDmabuf.%p", (gpointer) display);
+  gchar *name = g_strdup_printf ("GstVaWrappedSurface.%p", (gpointer) display);
   GQuark quark = g_quark_from_string (name);
   g_free (name);
   return quark;
@@ -1277,6 +1277,63 @@ gst_va_buffer_new_wrapped_dmabuf (GstVaDisplay * display, GstBuffer * inbuf,
   return GST_FLOW_OK;
 }
 
+/* Creates a fresh wrapped buffer re-attaching a cached VA surface. */
+static GstFlowReturn
+gst_va_buffer_new_wrapped_dmabuf_with_surface (GstVaDisplay * display,
+    GstBuffer * inbuf, GstVaBufferSurface * surface_buf, GstBuffer ** outbuf)
+{
+  g_autoptr (GstAllocator) allocator;
+  GstBuffer *wrapped_buf;
+  GstVideoMeta *meta;
+  guint i, n_mems;
+
+  *outbuf = NULL;
+
+  n_mems = gst_buffer_n_memory (inbuf);
+  if (n_mems == 0)
+    return GST_FLOW_ERROR;
+
+  allocator = gst_va_dmabuf_allocator_new (display);
+  wrapped_buf = gst_buffer_new ();
+
+  for (i = 0; i < n_mems; i++) {
+    GstMemory *mem_input, *mem_dma;
+
+    mem_input = gst_buffer_peek_memory (inbuf, i);
+    if (!gst_is_dmabuf_memory (mem_input)) {
+      gst_buffer_unref (wrapped_buf);
+      return GST_FLOW_ERROR;
+    }
+
+    mem_dma = gst_dmabuf_allocator_alloc_with_flags (allocator,
+        gst_dmabuf_memory_get_fd (mem_input),
+        mem_input->size, GST_FD_MEMORY_FLAG_DONT_CLOSE);
+
+    if (!mem_dma) {
+      gst_buffer_unref (wrapped_buf);
+      return GST_FLOW_ERROR;
+    }
+
+    gst_buffer_append_memory (wrapped_buf, mem_dma);
+
+    /* attach the cached VA surface to each new mem_dma */
+    g_atomic_int_add (&surface_buf->ref_count, 1);
+    gst_mini_object_set_qdata (GST_MINI_OBJECT (mem_dma),
+        gst_va_buffer_surface_quark (), surface_buf, gst_va_buffer_surface_unref);
+  }
+
+  meta = gst_buffer_get_video_meta (inbuf);
+  if (meta) {
+    gst_buffer_add_video_meta_full (wrapped_buf,
+        meta->flags,
+        meta->format, meta->width, meta->height,
+        meta->n_planes, meta->offset, meta->stride);
+  }
+
+  *outbuf = wrapped_buf;
+  return GST_FLOW_OK;
+}
+
 /**
  * gst_va_buffer_prepare_for_import:
  * @display: target #GstVaDisplay
@@ -1306,31 +1363,66 @@ gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
   if (mem && gst_is_dmabuf_memory (mem) &&
       GST_IS_VA_DMABUF_ALLOCATOR (mem->allocator) &&
       gst_va_allocator_peek_display (mem->allocator) != display) {
-    GstBuffer *cached;
-    GstFlowReturn ret;
-    GQuark quark = gst_va_wrapped_dmabuf_quark_for_display (display);
+    GstVaBufferSurface *cached_surface;
+    GQuark quark = gst_va_wrapped_dmabuf_surface_quark_for_display (display);
 
-    cached = gst_mini_object_get_qdata (GST_MINI_OBJECT (mem), quark);
-    if (cached && gst_va_buffer_peek_display (cached) == display) {
-      *imported_buffer = gst_buffer_ref (cached);
-      GST_ERROR ("cache hit: reusing wrapped dmabuf fd %d for mem %p [X-cache-X]",
-          gst_dmabuf_memory_get_fd (mem), (void *) mem);
-      return GST_FLOW_OK;
+    cached_surface = gst_mini_object_get_qdata (GST_MINI_OBJECT (mem), quark);
+    if (cached_surface) {
+      GST_LOG ("cache hit: reusing VA surface %#x for mem %p",
+          cached_surface->surface, (void *) mem);
+      return gst_va_buffer_new_wrapped_dmabuf_with_surface (display, buffer,
+          cached_surface, imported_buffer);
     }
 
-    ret = gst_va_buffer_new_wrapped_dmabuf (display, buffer, imported_buffer);
-    if (ret == GST_FLOW_OK) {
-      GST_ERROR ("cache miss: created wrapped dmabuf fd %d for mem %p",
-          gst_dmabuf_memory_get_fd (mem), (void *) mem);
-      gst_mini_object_set_qdata (GST_MINI_OBJECT (mem), quark,
-          gst_buffer_ref (*imported_buffer),
-          (GDestroyNotify) gst_buffer_unref);
-    }
-    return ret;
+    /* cache miss: VA surface will be set by _try_import_dmabuf_unlocked */
+    return gst_va_buffer_new_wrapped_dmabuf (display, buffer, imported_buffer);
   }
 
   *imported_buffer = gst_buffer_ref (buffer);
   return GST_FLOW_OK;
+}
+
+/**
+ * gst_va_buffer_cache_import_surface:
+ * @source_buf: the original source #GstBuffer
+ * @imported_buf: the imported wrapped #GstBuffer with a VA surface
+ * @display: the #GstVaDisplay used for import
+ *
+ * Caches the VA surface from @imported_buf onto @source_buf's memory so
+ * subsequent imports of the same buffer reuse the surface without calling
+ * va_create_surfaces again.
+ *
+ * Since: 1.30
+ */
+void
+gst_va_buffer_cache_import_surface (GstBuffer * source_buf,
+    GstBuffer * imported_buf, GstVaDisplay * display)
+{
+  GstMemory *src_mem, *imp_mem;
+  GstVaBufferSurface *surface_buf;
+  GQuark quark;
+
+  g_return_if_fail (GST_IS_BUFFER (source_buf));
+  g_return_if_fail (GST_IS_BUFFER (imported_buf));
+  g_return_if_fail (GST_IS_VA_DISPLAY (display));
+
+  src_mem = gst_buffer_peek_memory (source_buf, 0);
+  imp_mem = gst_buffer_peek_memory (imported_buf, 0);
+  if (!src_mem || !imp_mem)
+    return;
+
+  surface_buf = gst_mini_object_get_qdata (GST_MINI_OBJECT (imp_mem),
+      gst_va_buffer_surface_quark ());
+  if (!surface_buf)
+    return;
+
+  quark = gst_va_wrapped_dmabuf_surface_quark_for_display (display);
+  g_atomic_int_add (&surface_buf->ref_count, 1);
+  gst_mini_object_set_qdata (GST_MINI_OBJECT (src_mem), quark,
+      surface_buf, gst_va_buffer_surface_unref);
+
+  GST_LOG ("cached VA surface %#x for mem %p",
+      surface_buf->surface, (void *) src_mem);
 }
 
 /*===================== GstVaAllocator / GstVaMemory =========================*/
