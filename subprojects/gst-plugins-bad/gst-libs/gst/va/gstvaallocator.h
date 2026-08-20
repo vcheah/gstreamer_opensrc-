@@ -67,11 +67,6 @@ GstFlowReturn         gst_va_buffer_prepare_for_import    (GstVaDisplay * displa
                                                            GstBuffer ** imported_buffer);
 
 GST_VA_API
-void                  gst_va_buffer_cache_import_surface  (GstBuffer * source_buf,
-                                                           GstBuffer * imported_buf,
-                                                           GstVaDisplay * display);
-
-GST_VA_API
 guint64               gst_va_dmabuf_get_modifier_for_format (GstVaDisplay * display,
                                                              GstVideoFormat format,
                                                              guint usage_hint);

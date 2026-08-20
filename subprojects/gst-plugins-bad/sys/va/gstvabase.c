@@ -142,8 +142,6 @@ gst_va_buffer_importer_import (GstVaBufferImporter * importer,
 
   imported = _try_import_buffer (importer, prepared_buf);
   if (imported) {
-    if (prepared_buf != inbuf)
-      gst_va_buffer_cache_import_surface (inbuf, prepared_buf, importer->display);
     *outbuf = gst_buffer_ref (prepared_buf);
     gst_clear_buffer (&prepared_buf);
     return GST_FLOW_OK;
