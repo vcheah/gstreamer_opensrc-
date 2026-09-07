@@ -62,6 +62,10 @@ gboolean              gst_va_dmabuf_memories_setup        (GstVaDisplay * displa
                                                            guint usage_hint);
 
 GST_VA_API
+GstBuffer *           gst_va_buffer_prepare_for_import    (GstBuffer * buffer,
+                                                           GstVaDisplay * display);
+
+GST_VA_API
 guint64               gst_va_dmabuf_get_modifier_for_format (GstVaDisplay * display,
                                                              GstVideoFormat format,
                                                              guint usage_hint);
