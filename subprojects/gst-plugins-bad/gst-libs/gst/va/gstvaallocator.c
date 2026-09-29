@@ -1240,27 +1240,6 @@ gst_va_dmabuf_memories_setup (GstVaDisplay * display,
   return TRUE;
 }
 
-/* Returns a fresh ref=1 buffer sharing @src's memories (VASurface lives on
- * the memory qdata, so it is visible from the new buffer without extra refs). */
-static GstBuffer *
-_new_writable_copy (GstBuffer * src)
-{
-  GstBuffer *buf = gst_buffer_new ();
-  GstVideoMeta *meta;
-  guint i, n_mems = gst_buffer_n_memory (src);
-
-  for (i = 0; i < n_mems; i++)
-    gst_buffer_append_memory (buf,
-        gst_memory_ref (gst_buffer_peek_memory (src, i)));
-
-  meta = gst_buffer_get_video_meta (src);
-  if (meta)
-    gst_buffer_add_video_meta_full (buf, meta->flags, meta->format,
-        meta->width, meta->height, meta->n_planes, meta->offset, meta->stride);
-
-  return buf;
-}
-
 /**
  * gst_va_buffer_new_wrapped_dmabuf:
  * @display: a #GstVaDisplay
@@ -1378,11 +1357,9 @@ gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
       GST_DEBUG_OBJECT (display,
           "cache hit: reusing wrapped dmabuf fd %d for mem %p",
           gst_dmabuf_memory_get_fd (mem), (void *) mem);
-      /* Return a fresh ref=1 buffer so it is writable for metadata copies */
-      *imported_buffer = _new_writable_copy (cached);
-      if (!*imported_buffer)
-        GST_ERROR_OBJECT (display, "failed to wrap cached buffer for import");
-      return *imported_buffer ? GST_FLOW_OK : GST_FLOW_ERROR;
+
+      *imported_buffer = gst_buffer_ref (cached);
+      return GST_FLOW_OK;
     }
 
     ret = gst_va_buffer_new_wrapped_dmabuf (display, buffer, &cached);
@@ -1390,14 +1367,10 @@ gst_va_buffer_prepare_for_import (GstVaDisplay * display, GstBuffer * buffer,
       GST_DEBUG_OBJECT (display,
           "cache miss: created wrapped dmabuf fd %d for mem %p",
           gst_dmabuf_memory_get_fd (mem), (void *) mem);
-      /* Transfer ownership of cached to qdata; no extra ref needed */
+
       gst_mini_object_set_qdata (GST_MINI_OBJECT (mem), quark,
           cached, (GDestroyNotify) gst_buffer_unref);
-      *imported_buffer = _new_writable_copy (cached);
-      if (!*imported_buffer) {
-        GST_ERROR_OBJECT (display, "failed to wrap new buffer for import");
-        ret = GST_FLOW_ERROR;
-      }
+      *imported_buffer = gst_buffer_ref (cached);
     }
     return ret;
   }
