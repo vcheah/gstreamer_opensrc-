@@ -89,6 +89,7 @@ struct _GstVaComposeSample
 {
   /* input buffer (transfer full) */
   GstBuffer *buffer;
+  GstBuffer *wrapped_buffer;
 
   VARectangle input_region;
   VARectangle output_region;
